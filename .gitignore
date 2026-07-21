@@ -1,0 +1,30 @@
+# 시크릿 — 절대 커밋하지 않는다
+.env
+.env.local
+*.key
+
+# ── 외부 API 응답 원본(raw data)은 커밋하지 않는다 ──
+# 외부 서비스에서 받아온 데이터를 공개 저장소에 그대로 올리면
+# 각 서비스의 이용약관·데이터 재배포 조건에 걸릴 수 있다.
+# 무엇을 알아냈는지는 RESULTS.md 에 정리되어 있고,
+# 원본이 필요하면 각자 키로 스크립트를 직접 실행해서 받으면 된다.
+api-validation/results/
+link-poc/results.json
+link-poc/results-kakao*.json
+link-poc/outbound_test.json
+
+# 스크립트가 만들어 내는 HTML (응답 원본이 들어간다)
+link-poc/test-outbound.html
+link-poc/route-display.html
+
+# 의존성 / 빌드 산출물
+node_modules/
+__pycache__/
+*.pyc
+.ruff_cache/
+
+# 에이전트 · 편집기 · OS
+.omc/
+.DS_Store
+.idea/
+.vscode/
