@@ -241,7 +241,6 @@ MVP의 보드 상태는 세 개만 사용한다.
     "end": "2026-07-25"
   },
   "purpose": "저녁 식사",
-  "budgetPerPerson": 30000,
   "hostNickname": "종민"
 }
 ```
@@ -252,7 +251,6 @@ MVP의 보드 상태는 세 개만 사용한다.
 | `dateRange.start` | O | 오늘 이후 |
 | `dateRange.end` | O | `start` 이상, 최대 30일 범위 |
 | `purpose` | - | 100자 이하 |
-| `budgetPerPerson` | - | 0 이상 정수 |
 | `hostNickname` | O | 1~20자 |
 
 응답 `201 Created`:
@@ -293,7 +291,6 @@ MVP의 보드 상태는 세 개만 사용한다.
   "name": "주말 모임",
   "dateRange": { "start": "2026-07-25", "end": "2026-07-25" },
   "purpose": "저녁 식사",
-  "budgetPerPerson": 30000,
   "status": "COLLECTING",
   "timezone": "Asia/Seoul",
   "counts": { "participants": 3, "places": 5, "comments": 8 },
@@ -315,7 +312,7 @@ MVP의 보드 상태는 세 개만 사용한다.
 }
 ```
 
-- 수정 가능: `name`, `dateRange`, `purpose`, `budgetPerPerson`
+- 수정 가능: `name`, `dateRange`, `purpose`
 - `status`는 `CLOSED`로만 변경할 수 있다.
 - 확정 후 날짜가 변경되면 기존 출발 안내는 `STALE`이 된다.
 

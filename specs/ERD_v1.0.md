@@ -55,7 +55,6 @@ erDiagram
 | date_start | date | not null | |
 | date_end | date | not null | start 이상 |
 | purpose | text | | 선택 |
-| budget_per_person | int | | 선택, 0 이상 |
 | status | text | not null, default 'COLLECTING' | COLLECTING / CONFIRMED / CLOSED |
 | invite_code_hash | text | unique, not null | HMAC 값만 저장 |
 | invite_expires_at | timestamptz | not null | |
