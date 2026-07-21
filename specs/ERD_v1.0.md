@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 문서 버전 | 1.0 |
-| 작성일 | 2026-07-21 |
+| 작성일 | 2026-07-22 |
 | 기준 문서 | `기능명세서_v1.3.md`, `API명세서_v1.1.md`, `시스템아키텍처_v1.0.md` |
 | DB | PostgreSQL (로컬: Docker, 운영: Cloud SQL) |
 | 스키마 관리 | Flyway migration만 사용 |
@@ -15,7 +15,7 @@
 1. **PK는 내부 `bigint` identity**, 외부 노출용 `public_id`(ULID + 접두사, 예: `brd_01H...`)를 별도 unique 컬럼으로 둔다. FK는 전부 bigint.
 2. **코스 초안 stops는 JSONB 한 컬럼**. 초안은 PUT 전체 교체라 정규화하지 않는다.
 3. **확정 코스도 스냅샷 복사하지 않는다.** `course_stop`은 `place_id` FK만 참조한다. 장소는 soft delete라 행이 사라지지 않으므로 조회는 가능하다. MVP에서 DB 수준 불변성을 강제하지 않는다.
-4. **외부 API 캐시 전용 테이블은 만들지 않는다.** 외부 호출 결과는 도메인 테이블(작업 result, 출발 계산 결과)에 저장한다. 만료·재사용 정책은 추후 별도 결정.
+4. **외부 API 결과 캐시와 캐시 전용 테이블은 사용하지 않는다.** 검색 후보는 저장하지 않고, 사용자가 확정한 장소·출발지와 지역 찾기·출발 안내 결과만 도메인 테이블에 저장한다. TTL이나 캐시 적중 정책을 두지 않는다.
 5. MVP 제외: `PlaceReaction`(P1), `ActivityEvent`(조회 API 없음), 알림, 운영 대시보드 테이블. PostGIS 미사용 — 폴리곤 연산은 JTS가 애플리케이션에서 수행하고 GeoJSON은 JSONB로 저장.
 
 ## 1. 전체 관계도
@@ -230,7 +230,8 @@ erDiagram
 
 - `NOT_REQUESTED`는 행 없음으로 표현한다.
 - 출발지·일정 변경 시 해당 행들을 STALE로 갱신 (BR-012).
-- TMAP 응답 재사용(같은 좌표쌍 24h 캐시)은 이 테이블 조회로 대신한다. 별도 캐시 테이블 없음 — 정책은 추후 결정.
+- `CALCULATING`은 대기와 실행을 함께 나타낸다. 단일 Job Executor가 처리하며 짧은 인메모리 재시도 후에도 실패하면 `FAILED`로 저장한다.
+- 같은 참여자·코스의 `READY` 행 반환은 캐시 적중이 아니라 현재 도메인 결과 조회다. 별도 TMAP 좌표쌍 캐시나 TTL은 두지 않는다.
 
 ## 3. 인덱스 요약
 
@@ -258,7 +259,7 @@ create unique index on area_search_job (board_id)
 | 항목 | 이유 |
 |---|---|
 | 확정 코스 스냅샷 컬럼 | place가 soft delete라 FK로 충분. MVP 단순성 우선 (팀 결정) |
-| 외부 API 캐시 테이블 | 도메인 테이블 저장으로 대체, 만료 정책 추후 결정 (팀 결정) |
+| 외부 API 결과 캐시·캐시 테이블 | 검색 후보는 저장하지 않고 지역 찾기·출발 안내 결과만 도메인 기록으로 보존 (팀 결정) |
 | PostGIS | 폴리곤 연산은 JTS(앱), GeoJSON은 JSONB 저장으로 충분 |
 | enum 타입 (PostgreSQL ENUM) | 값 추가 시 migration 부담. text + 앱 검증 |
 | ActivityEvent / PlaceReaction / 알림 | MVP API에 없음 |

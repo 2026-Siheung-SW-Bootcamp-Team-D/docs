@@ -4,8 +4,8 @@
 |---|---|
 | 문서 유형 | API Specification — REST MVP |
 | 문서 버전 | 1.1 |
-| 작성일 | 2026-07-21 |
-| 기준 문서 | `기능명세서_v1.3.md` |
+| 작성일 | 2026-07-22 |
+| 기준 문서 | `기능명세서_v1.3.md`, `ERD_v1.0.md` |
 | Base URL | `https://{host}/api/v1` |
 | 데이터 형식 | JSON, UTF-8 |
 | 시간 | DB에는 UTC로 저장하고 API는 ISO 8601 오프셋을 포함해 응답 |
@@ -40,7 +40,7 @@
 - 외부 지도 URL 입력·해석과 웹페이지 메타데이터 수집
 - 중복 장소 자동 탐지·병합
 - 전체 대중교통 경로선 미리보기
-- 복잡한 분산 멱등성 저장소와 다단계 캐시 최적화
+- 복잡한 분산 멱등성 저장소와 외부 API 결과 캐시
 
 MVP에서는 중복 제출을 프론트엔드 버튼 잠금, 서버 트랜잭션, 상태 제약으로 방지한다. 운영 중 실제 중복 문제가 확인되면 `Idempotency-Key` 저장소를 추가한다.
 
@@ -147,11 +147,11 @@ GET /places?page=1&size=20
 - 참여자 목록과 검색 후보는 규모가 작으므로 페이지네이션하지 않는다.
 - 성능 문제가 확인되면 목록 API를 커서 방식으로 교체한다.
 
-### 2.6 캐시와 Rate limit
+### 2.6 HTTP 캐시와 Rate limit
 
 - 인증 응답은 `Cache-Control: private, no-store`로 반환한다.
 - 공개 일정은 `ETag`를 사용할 수 있으나 MVP에서는 `no-cache`로 재검증한다.
-- 외부 검색 결과의 서버 캐시는 별도로 유지한다.
+- 외부 API 결과 캐시는 사용하지 않는다. 검색 후보는 응답 후 폐기하고, 사용자가 선택한 값과 지역 찾기·출발 안내 결과만 도메인 데이터로 DB에 저장한다.
 
 | 대상 | MVP 제한 |
 |---|---:|
@@ -773,7 +773,7 @@ If-Match: "draft-3"
 
 ### 10.3 POST /boards/{boardId}/courses
 
-현재 초안을 불변 확정 코스로 생성한다.
+현재 초안의 순서·역할·예정시각을 새 확정 코스 버전으로 생성한다. 확정된 코스 구조는 애플리케이션에서 수정하지 않지만 장소 이름·주소·좌표는 스냅샷 없이 현재 Place 값을 참조한다.
 
 ```json
 { "draftVersion": 4 }
@@ -824,6 +824,8 @@ GET /boards/{boardId}/courses/{courseId}
 
 작업을 큐에 등록하고 `202 Accepted`를 반환한다.
 
+`CALCULATING`은 대기와 실행을 함께 나타내며 별도 출발 계산 job ID를 노출하지 않는다. 단일 Job Executor가 일시 오류를 짧게 재시도하고 한도를 넘으면 `FAILED`로 저장한다.
+
 ```http
 Location: /api/v1/boards/brd_01H.../participants/me/departure-guide
 Retry-After: 2
@@ -836,7 +838,7 @@ Retry-After: 2
 }
 ```
 
-같은 참여자·코스 버전의 계산이 이미 진행 중이면 새 작업을 만들지 않고 같은 응답을 반환한다. 캐시된 계산이 있으면 즉시 `200 OK`와 출발 안내를 반환할 수 있다.
+같은 참여자·코스 버전의 계산이 이미 진행 중이면 새 작업을 만들지 않고 같은 응답을 반환한다. 같은 조합의 저장된 `READY` 결과가 있으면 외부 API를 다시 호출하지 않고 즉시 `200 OK`와 출발 안내를 반환한다. 이는 캐시가 아니라 현재 도메인 결과 조회다.
 
 ### 11.2 GET /boards/{boardId}/participants/me/departure-guide
 
@@ -871,6 +873,7 @@ Retry-After: 2
 | `READY` | 사용 가능 |
 | `STALE` | 출발지·일정 변경으로 재계산 필요 |
 | `UNAVAILABLE` | 대중교통 경로 없음 |
+| `FAILED` | 외부 API 오류 또는 처리 실패 |
 
 권장 출발시각은 `첫 만남 시각 - totalSeconds - 10분`이다. `totalWalkSeconds`는 보조 표시만 하며 계산식에 다시 더하지 않는다. 화면에는 `현재 시간표 기준 추정`을 표시한다.
 
@@ -909,20 +912,22 @@ Retry-After: 2
 }
 ```
 
-응답에서 참여자, 출발지, 참여 토큰, 댓글, 투표 상세, 내부 `boardId`를 제외한다. 보드가 `CLOSED`이거나 공개가 중지된 경우 `404 RESOURCE_NOT_FOUND`를 반환해 토큰 존재 여부를 노출하지 않는다.
+응답에서 참여자, 출발지, 참여 토큰, 댓글, 투표 상세, 내부 `boardId`를 제외한다. 보드가 `CLOSED`이면 `404 RESOURCE_NOT_FOUND`를 반환해 토큰 존재 여부를 노출하지 않는다. MVP에는 별도 공개 중지 상태나 API를 두지 않는다.
+
+코스의 순서·역할·예정시각은 확정 버전에서 읽고, 장소 이름·주소·좌표는 현재 Place에서 읽는다. 따라서 확정 후 장소 정보가 변경되면 공개 응답도 변경된다. `updatedAt`은 코스와 참조 장소의 `updatedAt` 중 가장 최근 값이며, 공개 일정 ETag를 도입할 경우에도 같은 변경 범위를 반영해야 한다.
 
 ## 13. 외부 API 사용
 
-| 내부 요청 | 외부 기술 | 호출 시점 | 사용하는 응답 | 서버 캐시 |
+| 내부 요청 | 외부 기술 | 호출 시점 | 사용하는 응답 | 저장 정책 |
 |---|---|---|---|---|
-| `GET /place-candidates` | Kakao Local 키워드 검색 | 사용자가 검색 실행 | 장소 ID·이름·주소·카테고리·좌표·장소 URL·거리 | 동일 조건 24시간 |
-| `GET /address-candidates` | Kakao Local 주소 검색 | 사용자가 주소 검색 | 주소 유형·도로명·지번·좌표 | 정규화 주소 30일 |
-| `GET /coordinate-address` | Kakao Local 좌표→주소 | 사용자가 수동 핀 확정 | 도로명·지번 주소 | 좌표 격자 30일 |
-| `POST /area-search-jobs` | ODsay 도달권 | 호스트가 지역 찾기 실행 | WGS84 GeoJSON 폴리곤 | 입력 snapshot 7일 |
-| 지역 찾기 작업 내부 | Turf.js | 도달권 응답 후 | 교집합·면적·포함 여부 | 외부 호출 없음 |
-| 지역 찾기 작업 내부 | Kakao Local | 교집합 계산 후 | 역·기차역·터미널·시청·시장 후보 | 동일 조건 24시간 |
-| 지역 찾기 작업 내부 | TMAP Transit 요약 | 후보 최대 6개 평가 | 이동시간·환승·거리·요금 | 좌표쌍 24시간 |
-| `POST /departure-calculations` | TMAP Transit 요약 | 참여자가 계산 실행 | 이동시간·환승·요금·총 도보시간 | 좌표쌍·코스 버전 24시간 |
+| `GET /place-candidates` | Kakao Local 키워드 검색 | 사용자가 검색 실행 | 장소 ID·이름·주소·카테고리·좌표·장소 URL·거리 | 캐시하지 않으며 사용자가 선택한 결과만 Place에 저장 |
+| `GET /address-candidates` | Kakao Local 주소 검색 | 사용자가 주소 검색 | 주소 유형·도로명·지번·좌표 | 캐시하지 않으며 확정한 출발지 또는 장소만 저장 |
+| `GET /coordinate-address` | Kakao Local 좌표→주소 | 사용자가 수동 핀 확정 | 도로명·지번 주소 | 캐시하지 않으며 확정한 장소 정보만 저장 |
+| `POST /area-search-jobs` | ODsay 도달권 | 호스트가 지역 찾기 실행 | WGS84 GeoJSON 폴리곤 | AreaSearchJob의 snapshot·result에 저장 |
+| 지역 찾기 작업 내부 | JTS Topology Suite | 도달권 응답 후 | 교집합·면적·포함 여부 | 애플리케이션 내부 연산 결과를 AreaSearchJob.result에 저장 |
+| 지역 찾기 작업 내부 | Kakao Local | 교집합 계산 후 | 역·기차역·터미널·시청·시장 후보 | 선택된 후보를 AreaCandidate에 저장 |
+| 지역 찾기 작업 내부 | TMAP Transit 요약 | 후보 최대 6개 평가 | 이동시간·환승·거리·요금 | 평가 지표를 AreaCandidate.metrics에 저장 |
+| `POST /departure-calculations` | TMAP Transit 요약 | 참여자가 계산 실행 | 이동시간·환승·요금·총 도보시간 | 참여자×코스 버전 결과를 DepartureCalculation에 저장 |
 
 외부 API 키는 서버 비밀 저장소에 두고 클라이언트에 노출하지 않는다. 모든 외부 호출은 공급자별 Rate limit을 적용한다. 429에는 `Retry-After`를 우선 사용하고, 없으면 1초·2초·4초 간격으로 최대 3회 재시도한다.
 
