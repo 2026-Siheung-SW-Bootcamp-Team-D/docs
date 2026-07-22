@@ -16,7 +16,9 @@
 2. **코스 초안 stops는 JSONB 한 컬럼**. 초안은 PUT 전체 교체라 정규화하지 않는다.
 3. **확정 코스도 스냅샷 복사하지 않는다.** `course_stop`은 `place_id` FK만 참조한다. 장소는 soft delete라 행이 사라지지 않으므로 조회는 가능하다. MVP에서 DB 수준 불변성을 강제하지 않는다.
 4. **외부 API 결과 캐시와 캐시 전용 테이블은 사용하지 않는다.** 검색 후보는 저장하지 않고, 사용자가 확정한 장소·출발지와 지역 찾기·출발 안내 결과만 도메인 테이블에 저장한다. TTL이나 캐시 적중 정책을 두지 않는다.
-5. MVP 제외: `PlaceReaction`(P1), `ActivityEvent`(조회 API 없음), 알림, 운영 대시보드 테이블. PostGIS 미사용 — 폴리곤 연산은 JTS가 애플리케이션에서 수행하고 GeoJSON은 JSONB로 저장.
+5. **토큰 저장 방식은 용도에 따라 다르다.** 개인 인증용 참여 토큰 secret만 HMAC으로 저장한다(다시 보여줄 일이 없고, 유출 시 계정 도용이 되기 때문). 초대 코드와 공개 토큰은 **원문으로 저장**한다 — 호스트 초대 화면과 공유 링크에서 원문을 다시 보여줘야 하는데 HMAC은 역변환이 불가능하기 때문이다. 두 값은 만료·상태로 접근을 통제하고 로그에서 마스킹한다.
+6. **개인 출발지 좌표의 평문 사본을 만들지 않는다.** 좌표는 `participant.origin_ciphertext` 한 곳에만 암호화 저장하고, 지역 찾기 작업은 참여자 ID만 스냅샷으로 남긴 뒤 실행 시점에 원본을 복호화해 읽는다. **작업 입력의 일관성은 좌표 복사가 아니라 변경 잠금으로 보장한다** — 보드에 활성 지역 찾기 작업(`QUEUED`/`RUNNING`/`RETRY_WAIT`)이 있는 동안 대상 참여자의 출발지 변경을 거부하므로, 어느 phase에서 읽어도 좌표가 동일하고 재시작 후 재실행도 같은 입력을 쓴다.
+7. MVP 제외: `PlaceReaction`(P1), `ActivityEvent`(조회 API 없음), 알림, 운영 대시보드 테이블. PostGIS 미사용 — 폴리곤 연산은 JTS가 애플리케이션에서 수행하고 GeoJSON은 JSONB로 저장.
 
 ## 1. 전체 관계도
 
@@ -56,9 +58,9 @@ erDiagram
 | date_end | date | not null | start 이상 |
 | purpose | text | | 선택 |
 | status | text | not null, default 'COLLECTING' | COLLECTING / CONFIRMED / CLOSED |
-| invite_code_hash | text | unique, not null | HMAC 값만 저장 |
+| invite_code | text | unique, not null | 원문 저장. 호스트 초대 화면에서 다시 보여줘야 하므로 단방향 해시로 저장하지 않는다 |
 | invite_expires_at | timestamptz | not null | |
-| public_token_hash | text | unique | 최초 확정 시 생성, 그 전 null |
+| public_token | text | unique | 원문 저장. 최초 확정 시 생성, 그 전 null |
 
 ### 2.2 participant
 
@@ -152,10 +154,10 @@ erDiagram
 | board_id | bigint | FK board, not null | |
 | status | text | not null, default 'QUEUED' | QUEUED / RUNNING / RETRY_WAIT / SUCCEEDED / FAILED |
 | duration_min | int | not null | 30 / 45 / 60 |
-| snapshot | jsonb | not null | 대상 참여자 ID·출발 좌표 스냅샷 |
+| snapshot | jsonb | not null | **대상 참여자 ID 목록만** 저장. duration은 `duration_min` 컬럼에 있으므로 중복 저장하지 않고, 출발 좌표도 복사하지 않는다 |
 | progress | jsonb | | phase / done / total |
 | result | jsonb | | 교집합 GeoJSON + 요약 (성공 시) |
-| error_code | text | | NO_INTERSECTION / NO_HUB_FOUND / EXTERNAL_UNAVAILABLE |
+| error_code | text | | NO_INTERSECTION / NO_HUB_FOUND / EXTERNAL_UNAVAILABLE / ORIGIN_REQUIRED. 마지막은 접수 후 실행 시점에 대상 출발지가 사라진 경우(POST 검증 실패는 HTTP 422로 별도 처리) |
 | retry_count | int | not null, default 0 | |
 | next_retry_at | timestamptz | | RETRY_WAIT용 |
 | started_at / finished_at | timestamptz | | |

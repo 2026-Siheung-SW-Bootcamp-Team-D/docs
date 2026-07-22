@@ -62,7 +62,7 @@ Authorization: Bearer ptc_01HABC....{randomSecret}
 4. 토큰은 보드 생성·참여 성공 응답에서만 전달한다.
 5. 토큰을 분실하면 복구하지 않고 새 참여자로 입장한다.
 
-초대 코드와 공개 토큰도 원문 대신 HMAC 값을 저장한다. URL 경로에 포함되는 초대 코드와 공개 토큰은 접근 로그에서 마스킹한다.
+**초대 코드와 공개 토큰은 원문으로 저장한다.** 호스트 초대 화면(`GET /boards/{boardId}/invitation`)과 공유 링크에서 원문을 다시 보여줘야 하는데, HMAC은 역변환할 수 없어 재노출이 불가능하기 때문이다. 두 값은 만료 시각과 보드 상태로 접근을 통제하고, URL 경로에 포함되므로 접근 로그에서 마스킹한다. HMAC 저장은 다시 보여줄 필요가 없고 유출 시 계정 도용이 되는 **참여 토큰 secret에만** 적용한다.
 
 ### 2.2 요청 헤더
 
@@ -114,7 +114,6 @@ Authorization: Bearer ptc_01HABC....{randomSecret}
 | 409 | `PLACE_IN_USE` | 투표·코스가 참조하는 장소 삭제 시도 |
 | 412 | `VERSION_MISMATCH` | `If-Match`의 코스 초안 버전 불일치 |
 | 422 | `ORIGIN_REQUIRED` | 지역 계산 대상의 출발지 누락 |
-| 422 | `ROUTE_UNAVAILABLE` | 대중교통 경로를 찾지 못함 |
 | 429 | `RATE_LIMITED` | 본 서비스의 요청 제한 초과 |
 | 502 | `EXTERNAL_BAD_RESPONSE` | 외부 API의 잘못된 응답 |
 | 503 | `EXTERNAL_UNAVAILABLE` | 외부 API 장애·429 재시도 실패 |
@@ -406,6 +405,8 @@ POST /invitations/{inviteCode}/participants
 
 `origin.source`는 `KAKAO_KEYWORD`, `KAKAO_ADDRESS`, `MANUAL_PIN` 중 하나다. 출발지 변경 시 해당 참여자의 출발 안내를 `STALE`로 만든다.
 
+**단, 이 참여자가 대상으로 포함된 활성 지역 찾기 작업(`QUEUED`/`RUNNING`/`RETRY_WAIT`)이 있으면 출발지 변경을 거부하고 `409 RESOURCE_CONFLICT`를 반환한다.** 지역 찾기 결과가 한 작업 안에서 서로 다른 좌표를 섞어 계산하지 않도록, 작업 입력을 생성 시점 값으로 고정하기 위함이다. 작업이 종료 상태에 도달하면 다시 변경할 수 있다.
+
 ## 6. 장소·주소 후보 검색
 
 검색 API는 저장 자원을 만들지 않는 안전한 GET 요청이다. 외부 호출 비용이 발생할 수 있으므로 UI는 검색 버튼 또는 Enter 입력 때만 호출한다.
@@ -693,7 +694,8 @@ Retry-After: 2
 - 교집합은 면적 상위 3개 조각만 반환한다.
 - 최대 6개 후보를 평가하고 상위 3개를 반환한다.
 - 특정 참여자의 경로가 없어도 전체 작업은 계속한다.
-- 실패 시 `error.code`는 `NO_INTERSECTION`, `NO_HUB_FOUND`, `EXTERNAL_UNAVAILABLE` 중 하나다.
+- 실패 시 `error.code`는 `NO_INTERSECTION`, `NO_HUB_FOUND`, `EXTERNAL_UNAVAILABLE`, `ORIGIN_REQUIRED` 중 하나다.
+- `ORIGIN_REQUIRED`는 채널이 둘이다: **POST 접수 시점 검증 실패는 HTTP `422 ORIGIN_REQUIRED`** 로 즉시 반환하고, **접수 후 실행 시점에 대상 출발지가 사라진 경우는 이 조회의 `FAILED` + `error.code: ORIGIN_REQUIRED`** 로 나타난다.
 
 ## 10. 코스 초안과 확정 코스
 
@@ -709,6 +711,34 @@ ETag: "draft-3"
 {
   "version": 3,
   "stops": []
+}
+```
+
+초안은 확정 전까지 장소 삭제를 막지 않으므로(장소 사용 체크는 확정 코스에만 적용), 저장된
+스톱이 참조하는 장소가 나중에 삭제될 수 있다. 그런 스톱도 숨기거나 목록에서 빼지 않고 그대로
+반환하되, 각 스톱에 `placeDeleted`를 추가해 FE가 구분할 수 있게 한다. `legs`는 스톱 삭제 여부와
+무관하게 항상 전체 스톱 기준으로 계산한다.
+
+```json
+{
+  "version": 4,
+  "stops": [
+    {
+      "placeId": "plc_01H...",
+      "orderIndex": 1,
+      "role": "FIRST_MEETING",
+      "scheduledAt": "2026-07-26T18:00:00+09:00",
+      "placeDeleted": false
+    },
+    {
+      "placeId": "plc_02H...",
+      "orderIndex": 2,
+      "role": "CAFE",
+      "scheduledAt": "2026-07-26T19:30:00+09:00",
+      "placeDeleted": true
+    }
+  ],
+  "legs": []
 }
 ```
 
@@ -872,6 +902,8 @@ Retry-After: 2
 | `UNAVAILABLE` | 대중교통 경로 없음 |
 | `FAILED` | 외부 API 오류 또는 처리 실패 |
 
+출발 안내는 비동기 계산이므로 **대중교통 경로를 찾지 못한 경우도 오류 응답이 아니라 `UNAVAILABLE` 상태로 수렴한다.** 계산은 `202`를 반환한 뒤 백그라운드에서 진행되어 그 시점에는 이미 HTTP 응답이 끝나 있기 때문이다. 이 경로에서 `422 ROUTE_UNAVAILABLE`을 반환하지 않는다.
+
 권장 출발시각은 `첫 만남 시각 - totalSeconds - 10분`이다. `totalWalkSeconds`는 보조 표시만 하며 계산식에 다시 더하지 않는다. 화면에는 `현재 시간표 기준 추정`을 표시한다.
 
 ## 12. 공개 일정
@@ -920,7 +952,7 @@ Retry-After: 2
 | `GET /place-candidates` | Kakao Local 키워드 검색 | 사용자가 검색 실행 | 장소 ID·이름·주소·카테고리·좌표·장소 URL·거리 | 캐시하지 않으며 사용자가 선택한 결과만 Place에 저장 |
 | `GET /address-candidates` | Kakao Local 주소 검색 | 사용자가 주소 검색 | 주소 유형·도로명·지번·좌표 | 캐시하지 않으며 확정한 출발지 또는 장소만 저장 |
 | `GET /coordinate-address` | Kakao Local 좌표→주소 | 사용자가 수동 핀 확정 | 도로명·지번 주소 | 캐시하지 않으며 확정한 장소 정보만 저장 |
-| `POST /area-search-jobs` | ODsay 도달권 | 호스트가 지역 찾기 실행 | WGS84 GeoJSON 폴리곤 | AreaSearchJob의 snapshot·result에 저장 |
+| `POST /area-search-jobs` | ODsay 도달권 | 호스트가 지역 찾기 실행 | WGS84 GeoJSON 폴리곤 | 결과는 AreaSearchJob.result에 저장. snapshot에는 대상 참여자 ID만 저장한다 |
 | 지역 찾기 작업 내부 | JTS Topology Suite | 도달권 응답 후 | 교집합·면적·포함 여부 | 애플리케이션 내부 연산 결과를 AreaSearchJob.result에 저장 |
 | 지역 찾기 작업 내부 | Kakao Local | 교집합 계산 후 | 역·기차역·터미널·시청·시장 후보 | 선택된 후보를 AreaCandidate에 저장 |
 | 지역 찾기 작업 내부 | TMAP Transit 요약 | 후보 최대 6개 평가 | 이동시간·환승·거리·요금 | 평가 지표를 AreaCandidate.metrics에 저장 |
@@ -946,7 +978,7 @@ Retry-After: 2
 
 ## 15. 데이터·보안 규칙
 
-1. 개인 출발지 좌표는 저장 시 암호화하고 본인 이외의 API 응답에 포함하지 않는다.
+1. 개인 출발지 좌표는 저장 시 암호화하고 본인 이외의 API 응답에 포함하지 않는다. **암호화된 원본 외에 평문 사본을 만들지 않는다** — 지역 찾기 작업 스냅샷에는 대상 참여자 ID만 저장하고 좌표는 실행 시점에 원본에서 복호화해 읽는다.
 2. 검색어 원문, 참여 토큰, 초대 코드, 공개 토큰을 애플리케이션 로그와 분석 이벤트에 기록하지 않는다.
 3. 장소명·댓글은 일반 텍스트로 저장하고 HTML로 렌더링하지 않는다.
 4. 클라이언트가 전송한 공급자 URL은 허용 도메인과 형식을 검증한다.
