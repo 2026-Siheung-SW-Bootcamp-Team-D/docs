@@ -1,0 +1,1 @@
+{"result":{"geojson":{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"x":"127.027619","y":"37.497942","searchTime":30,"searchMethod":4},"geometry":{"type":"MultiPolygon","coordinates":[[[[127.0,37.4],[127.1,37.4],[127.1,37.5],[127.0,37.4]]]]}}]}}}
