@@ -20,8 +20,8 @@
 - Node.js 18 이상
 - `backend/.env` 파일
 - 아래 외부 API 키 3개
-  - `KAKAO_REST_API_KEY`
-  - `ODSAY_API_KEY`
+  - `KAKAO_REST_KEY`
+  - `ODSAY_KEY`
   - `TMAP_APP_KEY`
 
 프로젝트 폴더는 다음처럼 `backend`와 `docs`가 나란히 있는 구조를 기준으로 합니다.
@@ -107,8 +107,8 @@ backend/.env
 그리고 `.env`에 다음 이름이 정확히 들어 있는지 확인합니다. 실제 키 값은 README나 Git에 올리지 않습니다.
 
 ```dotenv
-KAKAO_REST_API_KEY=발급받은_키
-ODSAY_API_KEY=발급받은_키
+KAKAO_REST_KEY=발급받은_키
+ODSAY_KEY=발급받은_키
 TMAP_APP_KEY=발급받은_키
 ```
 
@@ -121,6 +121,198 @@ TMAP_APP_KEY=발급받은_키
 ### 화면은 열리지만 지도가 보이지 않음
 
 지도 타일은 OpenStreetMap에서 불러옵니다. 인터넷 연결을 확인하고 페이지를 새로고침합니다.
+
+## 왜 현재 후보는 역·터미널 중심인가
+
+현재 PoC의 역·기차역·버스터미널·시청은 최종 약속 장소가 아니라, **모두가 실제로 갈 수 있는 지역을 찾기 위한 교통 거점(anchor)** 입니다.
+
+역만 추천하면 이동의 공정성은 설명할 수 있지만 “그래서 어디에서 만날 것인가?”가 남습니다. 최종 서비스는 다음 두 단계로 나누는 것이 적절합니다.
+
+### 1단계: 모두에게 공정한 만남 지역 선정
+
+1. 참여자별 대중교통 도달권을 구합니다.
+2. 전원의 도달권이 겹치는 공통 영역을 계산합니다.
+3. 공통 영역 안의 교통 거점을 찾습니다.
+4. 참여자별 실제 대중교통 시간으로 거점의 공정성을 비교합니다.
+
+이 단계의 결과는 `명학역` 같은 **추천 지역**입니다.
+
+### 2단계: 추천 지역 안에서 실제 약속 장소 선정
+
+선정된 상위 지역 주변을 Kakao 장소 검색으로 다시 조회합니다.
+
+- 음식점: 카테고리 코드 `FD6`
+- 카페: 카테고리 코드 `CE7`
+- 문화시설: 카테고리 코드 `CT1`
+- 관광명소: 카테고리 코드 `AT4`
+- 사용자가 직접 입력한 키워드: `고기`, `파스타`, `보드게임`, `조용한 카페` 등
+
+장소 후보는 다음 기준으로 추립니다.
+
+1. 추천 거점에서 도보 5~10분 이내
+2. 모든 참여자가 설정한 카테고리·취향과 일치
+3. 동일 장소 중복 제거
+4. 영업 여부, 평점, 가격대처럼 확보 가능한 정보 표시
+5. 팀원이 후보를 공동 저장하고 투표하거나 제외할 수 있도록 제공
+
+최종 화면의 정보 구조는 다음처럼 구성할 수 있습니다.
+
+```text
+공정한 만남 지역: 명학역
+├── 왜 이 지역인가: 최장 41분, 평균 39분, 도달 불가 0명
+└── 이 지역에서 어디로 갈까?
+    ├── 음식점
+    ├── 카페
+    ├── 놀거리
+    └── 팀원이 직접 추가한 장소
+```
+
+이렇게 하면 외부 API가 계산한 공정한 지역과, 사람들이 함께 축적하고 결정하는 실제 장소 후보가 분리됩니다. 발표에서도 “AI가 식당 하나를 정해준다”보다 **공정한 지역을 먼저 합의하고 그 안에서 팀이 후보를 모아 결정한다**는 제품 차별점이 선명해집니다.
+
+## 외부 API를 정확히 어떻게 사용하는가
+
+아래 내용은 현재 PoC 코드가 실제로 보내는 요청 기준입니다. 인증키의 실제 값은 기록하거나 화면에 전달하지 않습니다.
+
+공식 규격:
+
+- [Kakao Local REST API](https://developers.kakao.com/docs/ko/local/dev-guide)
+- [TMAP 대중교통 요약정보 API](https://transit.tmapmobility.com/docs/routes/sub)
+
+### 1. Kakao Local: 출발지와 후보 장소 검색
+
+#### 출발지 키워드 검색
+
+```http
+GET https://dapi.kakao.com/v2/local/search/keyword.json
+Authorization: KakaoAK {KAKAO_REST_KEY}
+
+?query=강남역
+&size=15
+```
+
+중심 좌표가 있는 후보 검색에서는 다음 값도 함께 보냅니다.
+
+```text
+x={중심 경도}
+y={중심 위도}
+radius=20000
+```
+
+현재 후보 거점 검색어는 다음 네 가지입니다.
+
+```text
+지하철역
+기차역
+시외버스터미널
+시청
+```
+
+응답에서는 다음 필드를 사용합니다.
+
+| Kakao 응답 필드 | 사용 목적 |
+| --- | --- |
+| `id` | 후보 중복 제거 키 |
+| `place_name` | 화면에 표시할 장소명 |
+| `category_name` | 장소 유형 |
+| `address_name` | 지번 주소 |
+| `road_address_name` | 도로명 주소 |
+| `x`, `y` | 경도·위도 |
+| `place_url` | Kakao 장소 상세 링크 |
+| `distance` | 검색 중심으로부터 거리 |
+
+#### 주소 검색
+
+```http
+GET https://dapi.kakao.com/v2/local/search/address.json
+Authorization: KakaoAK {KAKAO_REST_KEY}
+
+?query={사용자가 입력한 주소}
+&size=5
+```
+
+주소형 입력을 좌표로 바꿀 때 사용합니다.
+
+#### 식당·카페 확장 시 보낼 요청
+
+현재 PoC 다음 단계에서는 상위 거점 주변에 아래 요청을 추가할 수 있습니다.
+
+```http
+GET https://dapi.kakao.com/v2/local/search/category.json
+Authorization: KakaoAK {KAKAO_REST_KEY}
+
+?category_group_code=FD6
+&x={추천 거점 경도}
+&y={추천 거점 위도}
+&radius=1000
+&sort=distance
+&size=15
+```
+
+`FD6`을 `CE7`, `CT1`, `AT4` 등으로 바꾸면 카페·문화시설·관광명소를 같은 방식으로 수집할 수 있습니다.
+
+### 2. ODsay: 참여자별 대중교통 도달권
+
+```http
+GET https://api.odsay.com/v1/api/searchPubTransIsochrone
+
+?apiKey={ODSAY_KEY}
+&x={참여자 출발지 경도}
+&y={참여자 출발지 위도}
+&searchTime={30|45|60}
+&searchMethod=4
+```
+
+각 참여자에 대해 한 번씩 호출합니다. 응답의 `result.geojson`을 `Polygon` 또는 `MultiPolygon` 도달권으로 사용하고, 모든 참여자의 도달권을 서버에서 교차 계산합니다.
+
+공통 영역이 없으면 오류로 처리하지 않고 `NO_INTERSECTION`이라는 정상 결과를 반환합니다.
+
+### 3. TMAP Transit: 참여자별 실제 이동시간 비교
+
+```http
+POST https://apis.openapi.sk.com/transit/routes/sub
+appKey: {TMAP_APP_KEY}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "startX": "{참여자 출발지 경도}",
+  "startY": "{참여자 출발지 위도}",
+  "endX": "{후보 장소 경도}",
+  "endY": "{후보 장소 위도}",
+  "count": 1
+}
+```
+
+`참여자 수 × 후보 수`만큼 호출합니다. 응답의 첫 번째 경로에서 다음 값을 사용합니다.
+
+| TMAP 응답 필드 | 사용 목적 |
+| --- | --- |
+| `totalTime` | 총 이동시간 |
+| `totalWalkTime` | 총 도보시간 |
+| `transferCount` | 환승 횟수 |
+| `fare.regular.totalFare` | 일반 요금 |
+
+후보 순위는 다음 순서로 결정합니다.
+
+1. 도달 불가 참여자가 적은 후보
+2. 가장 오래 걸리는 사람의 시간이 짧은 후보
+3. 전체 평균 이동시간이 짧은 후보
+4. 평균 환승 횟수가 적은 후보
+
+따라서 단순한 직선거리 중간점이 아니라, 특정 참여자 한 명에게 긴 이동을 몰아주지 않는 후보를 설명 가능한 숫자로 제시합니다.
+
+### 전체 호출 흐름
+
+```text
+Kakao 출발지 검색
+  → ODsay 도달권 요청(참여자별)
+  → 서버에서 도달권 교집합 계산
+  → Kakao 교통 거점 검색
+  → TMAP 이동시간 요청(참여자 × 거점)
+  → 공정한 지역 순위
+  → Kakao 식당·카페·놀거리 검색
+  → 팀 공동 저장·비교·투표
+```
 
 ## 실 API 시나리오 보고서 다시 만들기
 
