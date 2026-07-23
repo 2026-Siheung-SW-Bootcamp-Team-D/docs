@@ -35,6 +35,21 @@ function sendJson(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+function mapErrorStatus(error) {
+  switch (error?.classification) {
+    case "UPSTREAM_5XX":
+    case "UPSTREAM_BAD_RESPONSE":
+      return 502;
+    case "TRANSPORT":
+    case "RATE_LIMITED":
+      return 503;
+    case "TIMEOUT":
+      return 504;
+    default:
+      return Number(error?.status) || 400;
+  }
+}
+
 async function readJson(request) {
   const chunks = [];
   let size = 0;
@@ -243,7 +258,9 @@ function createAppServer({ providers, jobs }) {
       });
       fs.createReadStream(file).pipe(response);
     } catch (error) {
-      sendJson(response, Number(error.status) || 400, { error: error.message });
+      sendJson(response, mapErrorStatus(error), {
+        error: error.publicMessage || error.message,
+      });
     }
   });
 }

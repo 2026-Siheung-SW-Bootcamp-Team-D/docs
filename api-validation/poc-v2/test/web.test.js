@@ -42,6 +42,9 @@ function createElement(tagName = "div") {
     setAttribute(name, value) {
       this[name] = value;
     },
+    closest() {
+      return null;
+    },
     querySelectorAll() {
       return [];
     },
@@ -53,7 +56,9 @@ function loadBrowserTestHooks({ fetchImpl }) {
   const elements = new Map([
     ["#venue-status", createElement("p")],
     ["#venue-results", createElement("div")],
+    ["#shortlist", createElement("div")],
     ["#shortlist-panel", createElement("section")],
+    ["#evaluate-shortlist", createElement("button")],
     ["#shortlist-matrix", createElement("table")],
     ["#calls", createElement("table")],
   ]);

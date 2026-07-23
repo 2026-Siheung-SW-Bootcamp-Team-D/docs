@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createHttpClient, sanitizeUrl } = require("../src/http-client");
+const {
+  HttpClientError,
+  createHttpClient,
+  sanitizeUrl,
+} = require("../src/http-client");
 
 test("URL의 apiKey를 제거한다", () => {
   assert.equal(
@@ -67,5 +71,75 @@ test("JSON이 아닌 응답은 계약 오류로 거부한다", async () => {
   await assert.rejects(
     client.json({ provider: "TEST", url: "https://api.example/path" }),
     /JSON이 아닌 응답/
+  );
+});
+
+test("타임아웃은 분류 가능한 HttpClientError로 던진다", async () => {
+  const client = createHttpClient({
+    fetchImpl: async () => {
+      const error = new Error("timed out");
+      error.name = "TimeoutError";
+      throw error;
+    },
+    maxRetries: 1,
+  });
+
+  await assert.rejects(
+    client.json({ provider: "TEST", url: "https://api.example/path" }),
+    (error) =>
+      error instanceof HttpClientError &&
+      error.classification === "TIMEOUT" &&
+      error.publicMessage === "외부 서비스 응답 시간이 초과되었습니다."
+  );
+});
+
+test("전송 실패는 분류 가능한 HttpClientError로 던진다", async () => {
+  const client = createHttpClient({
+    fetchImpl: async () => {
+      throw new TypeError("socket hang up");
+    },
+    maxRetries: 1,
+  });
+
+  await assert.rejects(
+    client.json({ provider: "TEST", url: "https://api.example/path" }),
+    (error) =>
+      error instanceof HttpClientError &&
+      error.classification === "TRANSPORT"
+  );
+});
+
+test("재시도 후에도 429면 분류 가능한 HttpClientError로 던진다", async () => {
+  const client = createHttpClient({
+    fetchImpl: async () =>
+      new Response('{"error":"too many requests"}', {
+        status: 429,
+        headers: { "Retry-After": "0" },
+      }),
+    maxRetries: 2,
+    sleep: async () => {},
+  });
+
+  await assert.rejects(
+    client.json({ provider: "TEST", url: "https://api.example/path" }),
+    (error) =>
+      error instanceof HttpClientError &&
+      error.classification === "RATE_LIMITED"
+  );
+});
+
+test("상류 5xx는 분류 가능한 HttpClientError로 던지고 본문을 노출하지 않는다", async () => {
+  const client = createHttpClient({
+    fetchImpl: async () =>
+      new Response('{"error":"db password leaked"}', { status: 502 }),
+    maxRetries: 1,
+  });
+
+  await assert.rejects(
+    client.json({ provider: "TEST", url: "https://api.example/path?apiKey=secret" }),
+    (error) =>
+      error instanceof HttpClientError &&
+      error.classification === "UPSTREAM_5XX" &&
+      !/secret|password/i.test(error.message)
   );
 });

@@ -8,6 +8,7 @@ let currentShortlistEvaluation = null;
 let currentCallRecords = [];
 let activeVenueCategory = "FD6";
 let venueSearchToken = 0;
+let shortlistPendingCount = 0;
 
 const customParticipants = [
   { label: "", lon: null, lat: null },
@@ -50,6 +51,31 @@ function isActiveLiveScenario(scenario) {
 
 function setVenueStatus(message = "") {
   document.querySelector("#venue-status").textContent = message;
+}
+
+function isShortlistBusy() {
+  return shortlistPendingCount > 0;
+}
+
+function syncShortlistInteractivity() {
+  const evaluateButton = document.querySelector("#evaluate-shortlist");
+  if (evaluateButton) {
+    evaluateButton.disabled = !currentShortlist.length || isShortlistBusy();
+  }
+}
+
+function beginShortlistRequest() {
+  shortlistPendingCount += 1;
+  syncShortlistInteractivity();
+  renderVenueCards();
+  renderShortlist();
+}
+
+function endShortlistRequest() {
+  if (shortlistPendingCount > 0) shortlistPendingCount -= 1;
+  syncShortlistInteractivity();
+  renderVenueCards();
+  renderShortlist();
 }
 
 function resetVenueSearchState(message = "") {
@@ -254,7 +280,7 @@ function renderVenueCards() {
         action: "add-venue",
         id: place.id,
         className: "primary",
-        disabled: added,
+        disabled: added || isShortlistBusy(),
       })
     );
 
@@ -287,7 +313,7 @@ function renderShortlist() {
   const container = document.querySelector("#shortlist");
   const evaluateButton = document.querySelector("#evaluate-shortlist");
 
-  evaluateButton.disabled = !currentShortlist.length;
+  evaluateButton.disabled = !currentShortlist.length || isShortlistBusy();
   if (shortlistPanel.hidden) {
     container.replaceChildren();
     return;
@@ -327,12 +353,14 @@ function renderShortlist() {
         label: Number(place.vote) === 1 ? "투표 취소" : "팀 투표",
         action: "toggle-vote",
         id: place.id,
+        disabled: isShortlistBusy(),
       }),
       createActionButton({
         label: "후보 제거",
         action: "remove-shortlist",
         id: place.id,
         className: "danger",
+        disabled: isShortlistBusy(),
       })
     );
 
@@ -584,17 +612,22 @@ function showVenueError(error) {
 
 async function loadShortlist() {
   if (!activeJobId) return;
-  const response = await fetch(
-    `/api/jobs/${encodePathSegment(activeJobId)}/shortlist`
-  ).then((result) => result.json());
-  if (response.error) throw new Error(response.error);
-  currentShortlist = Array.isArray(response.shortlist) ? response.shortlist : [];
-  currentShortlistEvaluation = null;
-  currentCallRecords = [];
-  MeetingMap.renderShortlist(currentShortlist);
-  renderShortlist();
-  renderShortlistMatrix();
-  renderActiveCalls();
+  beginShortlistRequest();
+  try {
+    const response = await fetch(
+      `/api/jobs/${encodePathSegment(activeJobId)}/shortlist`
+    ).then((result) => result.json());
+    if (response.error) throw new Error(response.error);
+    currentShortlist = Array.isArray(response.shortlist) ? response.shortlist : [];
+    currentShortlistEvaluation = null;
+    currentCallRecords = [];
+    MeetingMap.renderShortlist(currentShortlist);
+    renderShortlist();
+    renderShortlistMatrix();
+    renderActiveCalls();
+  } finally {
+    endShortlistRequest();
+  }
 }
 
 async function searchVenues({ category = null, query = null }) {
@@ -646,80 +679,104 @@ async function addVenueToShortlist(placeId) {
   if (!place) {
     throw new Error("선택한 장소를 찾을 수 없습니다.");
   }
+  beginShortlistRequest();
+  setVenueStatus("공동 후보를 업데이트하는 중입니다.");
+  try {
+    const response = await fetch(
+      `/api/jobs/${encodePathSegment(activeJobId)}/shortlist`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(place),
+      }
+    ).then((result) => result.json());
+    if (response.error) throw new Error(response.error);
 
-  const response = await fetch(
-    `/api/jobs/${encodePathSegment(activeJobId)}/shortlist`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(place),
-    }
-  ).then((result) => result.json());
-  if (response.error) throw new Error(response.error);
-
-  currentShortlist = response.shortlist;
-  currentShortlistEvaluation = null;
-  currentCallRecords = [];
-  MeetingMap.renderShortlist(currentShortlist);
-  renderVenueCards();
-  renderShortlist();
-  renderShortlistMatrix();
-  renderActiveCalls();
-  setVenueStatus("공동 후보에 추가했습니다.");
+    currentShortlist = Array.isArray(response.shortlist) ? response.shortlist : [];
+    currentShortlistEvaluation = null;
+    currentCallRecords = [];
+    MeetingMap.renderShortlist(currentShortlist);
+    renderVenueCards();
+    renderShortlist();
+    renderShortlistMatrix();
+    renderActiveCalls();
+    setVenueStatus("공동 후보에 추가했습니다.");
+  } finally {
+    endShortlistRequest();
+  }
 }
 
 async function removeVenueFromShortlist(placeId) {
-  const response = await fetch(
-    `/api/jobs/${encodePathSegment(activeJobId)}/shortlist/${encodePathSegment(placeId)}`,
-    { method: "DELETE" }
-  ).then((result) => result.json());
-  if (response.error) throw new Error(response.error);
+  beginShortlistRequest();
+  setVenueStatus("공동 후보를 업데이트하는 중입니다.");
+  try {
+    const response = await fetch(
+      `/api/jobs/${encodePathSegment(activeJobId)}/shortlist/${encodePathSegment(placeId)}`,
+      { method: "DELETE" }
+    ).then((result) => result.json());
+    if (response.error) throw new Error(response.error);
 
-  currentShortlist = response.shortlist;
-  currentShortlistEvaluation = null;
-  currentCallRecords = [];
-  MeetingMap.renderShortlist(currentShortlist);
-  renderVenueCards();
-  renderShortlist();
-  renderShortlistMatrix();
-  renderActiveCalls();
-  setVenueStatus("공동 후보에서 제거했습니다.");
+    currentShortlist = Array.isArray(response.shortlist) ? response.shortlist : [];
+    currentShortlistEvaluation = null;
+    currentCallRecords = [];
+    MeetingMap.renderShortlist(currentShortlist);
+    renderVenueCards();
+    renderShortlist();
+    renderShortlistMatrix();
+    renderActiveCalls();
+    setVenueStatus("공동 후보에서 제거했습니다.");
+  } finally {
+    endShortlistRequest();
+  }
 }
 
 async function toggleShortlistVote(placeId) {
-  const response = await fetch(
-    `/api/jobs/${encodePathSegment(activeJobId)}/shortlist/${encodePathSegment(placeId)}/vote`,
-    { method: "POST" }
-  ).then((result) => result.json());
-  if (response.error) throw new Error(response.error);
+  beginShortlistRequest();
+  setVenueStatus("공동 후보를 업데이트하는 중입니다.");
+  try {
+    const response = await fetch(
+      `/api/jobs/${encodePathSegment(activeJobId)}/shortlist/${encodePathSegment(placeId)}/vote`,
+      { method: "POST" }
+    ).then((result) => result.json());
+    if (response.error) throw new Error(response.error);
 
-  currentShortlist = response.shortlist;
-  currentShortlistEvaluation = null;
-  currentCallRecords = [];
-  MeetingMap.renderShortlist(currentShortlist);
-  renderVenueCards();
-  renderShortlist();
-  renderShortlistMatrix();
-  renderActiveCalls();
-  setVenueStatus("팀 투표를 업데이트했습니다.");
+    currentShortlist = Array.isArray(response.shortlist) ? response.shortlist : [];
+    currentShortlistEvaluation = null;
+    currentCallRecords = [];
+    MeetingMap.renderShortlist(currentShortlist);
+    renderVenueCards();
+    renderShortlist();
+    renderShortlistMatrix();
+    renderActiveCalls();
+    setVenueStatus("팀 투표를 업데이트했습니다.");
+  } finally {
+    endShortlistRequest();
+  }
 }
 
 async function evaluateShortlist() {
   if (!activeJobId) {
     throw new Error("실시간 계산 결과가 필요합니다.");
   }
+  beginShortlistRequest();
   setVenueStatus("공동 후보의 실제 이동시간을 다시 계산하는 중입니다.");
-  const response = await fetch(
-    `/api/jobs/${encodePathSegment(activeJobId)}/shortlist/evaluate`,
-    { method: "POST" }
-  ).then((result) => result.json());
-  if (response.error) throw new Error(response.error);
+  try {
+    const response = await fetch(
+      `/api/jobs/${encodePathSegment(activeJobId)}/shortlist/evaluate`,
+      { method: "POST" }
+    ).then((result) => result.json());
+    if (response.error) throw new Error(response.error);
 
-  currentShortlistEvaluation = response.candidates;
-  currentCallRecords = Array.isArray(response.calls) ? response.calls : [];
-  renderShortlistMatrix();
-  renderActiveCalls();
-  setVenueStatus("실제 이동시간 비교를 업데이트했습니다.");
+    currentShortlistEvaluation = Array.isArray(response.candidates)
+      ? response.candidates
+      : null;
+    currentCallRecords = Array.isArray(response.calls) ? response.calls : [];
+    renderShortlistMatrix();
+    renderActiveCalls();
+    setVenueStatus("실제 이동시간 비교를 업데이트했습니다.");
+  } finally {
+    endShortlistRequest();
+  }
 }
 
 function bindVenueExplorer() {
@@ -901,6 +958,8 @@ if (teamdWebTest) {
         currentVenues,
         currentShortlist,
         currentShortlistEvaluation,
+        currentCallRecords,
+        shortlistBusy: isShortlistBusy(),
         venueSearchToken,
         venueStatus: document.querySelector("#venue-status").textContent,
       };

@@ -440,3 +440,78 @@ test("계산이 끝나지 않은 작업은 장소 탐색과 공동 후보 평가
     });
   }
 });
+
+test("상류 에러 분류를 502/503/504로 매핑하고 검증 오류는 400으로 유지한다", async (context) => {
+  const job = createCompletedJob("00000000-0000-4000-8000-000000000016");
+  job.shortlist = [
+    {
+      id: "venue-1",
+      name: "모두의 식탁",
+      category: "음식점 > 한식",
+      categoryGroupCode: "FD6",
+      phone: "",
+      address: "경기 안양시",
+      roadAddress: "",
+      lon: 126.92,
+      lat: 37.4,
+      vote: 0,
+    },
+  ];
+  const jobs = createMutableJobs(job);
+  const server = createAppServer({
+    providers: {
+      kakaoCategory: async () => {
+        const error = new Error("gateway unavailable");
+        error.classification = "UPSTREAM_5XX";
+        error.publicMessage = "외부 서비스 응답이 불안정합니다.";
+        throw error;
+      },
+      kakaoKeyword: async () => {
+        const error = new Error("transport failure");
+        error.classification = "TRANSPORT";
+        error.publicMessage = "외부 서비스 연결에 실패했습니다.";
+        throw error;
+      },
+      tmapTransit: async () => {
+        const error = new Error("timeout");
+        error.classification = "TIMEOUT";
+        error.publicMessage = "외부 서비스 응답 시간이 초과되었습니다.";
+        throw error;
+      },
+    },
+    jobs,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const upstream5xx = await fetch(
+    `${base}/api/venues/search?jobId=${job.id}&hubId=hub-1&category=FD6&radius=1000`
+  );
+  assert.equal(upstream5xx.status, 502);
+  assert.deepEqual(await upstream5xx.json(), {
+    error: "외부 서비스 응답이 불안정합니다.",
+  });
+
+  const transport = await fetch(
+    `${base}/api/venues/search?jobId=${job.id}&hubId=hub-1&query=${encodeURIComponent("카페")}&radius=1000`
+  );
+  assert.equal(transport.status, 503);
+  assert.deepEqual(await transport.json(), {
+    error: "외부 서비스 연결에 실패했습니다.",
+  });
+
+  const timeout = await fetch(`${base}/api/jobs/${job.id}/shortlist/evaluate`, {
+    method: "POST",
+  });
+  assert.equal(timeout.status, 504);
+  assert.deepEqual(await timeout.json(), {
+    error: "외부 서비스 응답 시간이 초과되었습니다.",
+  });
+
+  const validation = await fetch(
+    `${base}/api/venues/search?jobId=${job.id}&hubId=hub-1&category=XX1&radius=1000`
+  );
+  assert.equal(validation.status, 400);
+  assert.match((await validation.json()).error, /카테고리/);
+});
