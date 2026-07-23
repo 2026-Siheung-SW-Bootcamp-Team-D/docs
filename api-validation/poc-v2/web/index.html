@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Team D 외부 API PoC v2</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <p class="eyebrow">TEAM D · EXTERNAL API CONTRACT LAB</p>
+        <h1>모두가 납득할<br>만남 지역을 검증합니다</h1>
+        <p id="summary" class="hero-copy">실제 외부 API 검증 결과를 불러오는 중입니다.</p>
+      </div>
+      <div class="hero-flow" aria-label="서비스 계산 순서">
+        <span>출발지</span><b>→</b><span>도달권</span><b>→</b>
+        <span>교집합</span><b>→</b><span>대중교통 비교</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel lab-panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow dark">INTERACTIVE LAB</p>
+          <h2>내 출발지로 직접 계산하기</h2>
+          <p>참여자별 장소를 검색하고 실제 Kakao·ODsay·TMAP 흐름을 실행합니다.</p>
+        </div>
+        <span class="privacy-badge">API 키는 서버에만 보관</span>
+      </div>
+      <div id="participant-editor"></div>
+      <div class="lab-actions">
+        <button type="button" id="add-participant" class="secondary">＋ 참여자 추가</button>
+        <label class="duration-field">도달시간
+          <select id="duration">
+            <option value="30">30분</option>
+            <option value="45" selected>45분</option>
+            <option value="60">60분</option>
+          </select>
+        </label>
+        <button type="button" class="primary" id="run-custom">지역 찾기 실행</button>
+      </div>
+      <div id="job-progress" class="job-progress" hidden aria-live="polite">
+        <div class="progress-track"><div id="progress-bar"></div></div>
+        <p id="progress-label"></p>
+      </div>
+    </section>
+
+    <section class="results-header">
+      <div>
+        <p class="eyebrow dark">VALIDATION RESULT</p>
+        <h2>검증 시나리오</h2>
+      </div>
+      <nav id="scenario-tabs" aria-label="검증 시나리오"></nav>
+    </section>
+
+    <section class="status-grid" id="status-grid"></section>
+
+    <section class="layout">
+      <article class="panel map-panel">
+        <div class="section-heading compact">
+          <div>
+            <h2>도달권·공통 영역·후보</h2>
+            <p>색상별 도달권과 모두가 갈 수 있는 공통 영역을 비교합니다.</p>
+          </div>
+          <div class="legend">
+            <span><i class="dot red"></i>공통 영역</span>
+            <span><i class="dot navy"></i>후보</span>
+          </div>
+        </div>
+        <div id="map" role="img" aria-label="참여자 도달권과 후보 지도"></div>
+      </article>
+
+      <article class="panel ranking-panel">
+        <div class="section-heading compact">
+          <div>
+            <h2>설명 가능한 후보 순위</h2>
+            <p>도달 불가·최장시간·평균시간 순으로 비교합니다.</p>
+          </div>
+        </div>
+        <div id="ranking"></div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading compact">
+        <div>
+          <h2>참여자별 이동시간 행렬</h2>
+          <p>평균 뒤에 가려지는 한 사람의 긴 이동시간을 확인합니다.</p>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="matrix"></table></div>
+    </section>
+
+    <section class="panel">
+      <details>
+        <summary>외부 API 호출 계약 자세히 보기</summary>
+        <div class="table-wrap details-table"><table id="calls"></table></div>
+      </details>
+    </section>
+
+    <section class="panel error-panel" id="errors" hidden>
+      <h2>확인이 필요한 계약 차이</h2>
+      <ul id="error-list"></ul>
+    </section>
+  </main>
+
+  <footer>Team D · 약속 올인원 · External API PoC v2</footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
