@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { resolvePublicFile, createAppServer } = require("../src/serve");
+const { HttpClientError } = require("../src/http-client");
 
 function createCompletedJob(id = "00000000-0000-4000-8000-000000000010") {
   return {
@@ -514,4 +515,32 @@ test("상류 에러 분류를 502/503/504로 매핑하고 검증 오류는 400�
   );
   assert.equal(validation.status, 400);
   assert.match((await validation.json()).error, /카테고리/);
+});
+
+test("상류의 비JSON 응답 분류는 라우트에서 502로 노출되고 본문은 감춘다", async (context) => {
+  const job = createCompletedJob("00000000-0000-4000-8000-000000000017");
+  const server = createAppServer({
+    providers: {
+      kakaoCategory: async () => {
+        throw new HttpClientError("KAKAO: UPSTREAM_BAD_RESPONSE", {
+          classification: "UPSTREAM_BAD_RESPONSE",
+          provider: "KAKAO",
+          publicMessage: "외부 서비스 요청을 처리하지 못했습니다.",
+          status: 200,
+        });
+      },
+    },
+    jobs: createMutableJobs(job),
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const response = await fetch(
+    `${base}/api/venues/search?jobId=${job.id}&hubId=hub-1&category=FD6&radius=1000`
+  );
+  assert.equal(response.status, 502);
+  assert.deepEqual(await response.json(), {
+    error: "외부 서비스 요청을 처리하지 못했습니다.",
+  });
 });

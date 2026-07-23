@@ -95,7 +95,12 @@ function createHttpClient({
       try {
         parsed = JSON.parse(text);
       } catch {
-        throw new Error(`${provider}: JSON이 아닌 응답 status=${response.status}`);
+        throw createUpstreamError({
+          provider,
+          classification: "UPSTREAM_BAD_RESPONSE",
+          publicMessage: "외부 서비스 요청을 처리하지 못했습니다.",
+          status: response.status,
+        });
       }
 
       if (response.status === 429 && attempt < maxRetries) {
