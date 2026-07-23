@@ -6,6 +6,7 @@ let currentVenues = [];
 let currentShortlist = [];
 let currentShortlistEvaluation = null;
 let activeVenueCategory = "FD6";
+let venueSearchToken = 0;
 
 const customParticipants = [
   { label: "", lon: null, lat: null },
@@ -48,6 +49,17 @@ function isActiveLiveScenario(scenario) {
 
 function setVenueStatus(message = "") {
   document.querySelector("#venue-status").textContent = message;
+}
+
+function resetVenueSearchState(message = "") {
+  venueSearchToken += 1;
+  currentVenues = [];
+  currentShortlistEvaluation = null;
+  MeetingMap.renderVenues([]);
+  renderVenueCards();
+  renderShortlistMatrix();
+  setVenueStatus(message);
+  return venueSearchToken;
 }
 
 function appendEmptyState(container, message) {
@@ -426,7 +438,9 @@ function renderVenueExplorer(scenario) {
   if (!liveScenario) {
     explorer.hidden = true;
     shortlistPanel.hidden = true;
+    venueSearchToken += 1;
     currentVenues = [];
+    currentShortlistEvaluation = null;
     MeetingMap.renderVenues([]);
     MeetingMap.renderShortlist([]);
     setVenueStatus("");
@@ -574,22 +588,33 @@ async function searchVenues({ category = null, query = null }) {
   if (category) params.set("category", category);
   if (query) params.set("query", query);
 
-  setVenueStatus("실제 장소를 찾는 중입니다.");
-  const response = await fetch(`/api/venues/search?${params.toString()}`).then(
-    (value) => value.json()
-  );
-  if (response.error) throw new Error(response.error);
+  const requestToken = resetVenueSearchState("실제 장소를 찾는 중입니다.");
 
-  currentVenues = Array.isArray(response.places) ? response.places : [];
-  currentShortlistEvaluation = null;
-  MeetingMap.renderVenues(currentVenues);
-  renderVenueCards();
-  renderShortlistMatrix();
-  setVenueStatus(
-    currentVenues.length
-      ? `${currentVenues.length}곳을 찾았습니다. 공동 후보에 담아 비교해 보세요.`
-      : "조건에 맞는 장소를 찾지 못했습니다. 다른 카테고리나 검색어를 시도해 보세요."
-  );
+  try {
+    const response = await fetch(`/api/venues/search?${params.toString()}`).then(
+      (value) => value.json()
+    );
+    if (requestToken !== venueSearchToken) {
+      return false;
+    }
+    if (response.error) throw new Error(response.error);
+
+    currentVenues = Array.isArray(response.places) ? response.places : [];
+    MeetingMap.renderVenues(currentVenues);
+    renderVenueCards();
+    renderShortlistMatrix();
+    setVenueStatus(
+      currentVenues.length
+        ? `${currentVenues.length}곳을 찾았습니다. 공동 후보에 담아 비교해 보세요.`
+        : "조건에 맞는 장소를 찾지 못했습니다. 다른 카테고리나 검색어를 시도해 보세요."
+    );
+    return true;
+  } catch (error) {
+    if (requestToken !== venueSearchToken) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function addVenueToShortlist(placeId) {
@@ -668,12 +693,7 @@ async function evaluateShortlist() {
 function bindVenueExplorer() {
   document.querySelector("#hub-select").addEventListener("change", (event) => {
     activeHubId = event.currentTarget.value;
-    currentVenues = [];
-    currentShortlistEvaluation = null;
-    MeetingMap.renderVenues([]);
-    renderVenueCards();
-    renderShortlistMatrix();
-    setVenueStatus("추천 지역이 바뀌었습니다. 카테고리나 검색어로 실제 장소를 찾아보세요.");
+    resetVenueSearchState("추천 지역이 바뀌었습니다. 카테고리나 검색어로 실제 장소를 찾아보세요.");
   });
 
   document
@@ -822,4 +842,38 @@ async function boot() {
   }
 }
 
-boot().catch(showLabError);
+const teamdWebTest = globalThis.__TEAMD_WEB_TEST__ || null;
+
+if (teamdWebTest) {
+  Object.assign(teamdWebTest, {
+    safeHttpUrl,
+    encodePathSegment,
+    searchVenues,
+    setVenueTestState({
+      activeJobId: nextActiveJobId = activeJobId,
+      activeHubId: nextActiveHubId = activeHubId,
+      activeScenario: nextActiveScenario = activeScenario,
+      currentShortlist: nextCurrentShortlist = currentShortlist,
+    } = {}) {
+      activeJobId = nextActiveJobId;
+      activeHubId = nextActiveHubId;
+      activeScenario = nextActiveScenario;
+      currentShortlist = nextCurrentShortlist;
+    },
+    getVenueState() {
+      return {
+        activeJobId,
+        activeHubId,
+        currentVenues,
+        currentShortlist,
+        currentShortlistEvaluation,
+        venueSearchToken,
+        venueStatus: document.querySelector("#venue-status").textContent,
+      };
+    },
+  });
+}
+
+if (!teamdWebTest?.skipBoot) {
+  boot().catch(showLabError);
+}
