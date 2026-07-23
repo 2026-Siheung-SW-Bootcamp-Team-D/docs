@@ -68,6 +68,12 @@ test("Kakao 선택 필드가 없어도 안전한 빈 문자열을 반환한다",
   assert.equal(places[0].distanceMeters, null);
 });
 
+test("Kakao 정규화 결과는 기존처럼 변경 가능한 일반 객체다", () => {
+  const places = normalizeKakaoKeyword(fixture("kakao-category.json"));
+  places[0].phone = "010-0000-0000";
+  assert.equal(places[0].phone, "010-0000-0000");
+});
+
 test("Kakao 주소 검색은 중첩 road_address.address_name을 읽는다", () => {
   const addresses = normalizeKakaoAddress(fixture("kakao-address.json"));
   assert.equal(addresses[0].roadAddress, "서울 중구 세종대로 110");

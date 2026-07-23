@@ -11,7 +11,7 @@ function normalizeKakaoPlace(doc) {
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
     throw new Error("계약 위반: documents[].x/y 숫자");
   }
-  return Object.freeze({
+  return {
     id: String(requireValue(doc.id, "documents[].id")),
     name: String(requireValue(doc.place_name, "documents[].place_name")),
     category: String(doc.category_name || ""),
@@ -26,7 +26,7 @@ function normalizeKakaoPlace(doc) {
       doc.distance === undefined || doc.distance === ""
         ? null
         : Number(doc.distance),
-  });
+  };
 }
 
 function normalizeKakaoKeyword(body) {
