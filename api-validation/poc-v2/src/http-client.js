@@ -1,7 +1,7 @@
 function sanitizeUrl(rawUrl) {
   const url = new URL(rawUrl);
   for (const key of ["apiKey", "appKey", "key"]) {
-    if (url.searchParams.has(key)) url.searchParams.set(key, "[REDACTED]");
+    url.searchParams.delete(key);
   }
   return url.toString();
 }

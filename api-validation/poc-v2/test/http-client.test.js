@@ -5,7 +5,7 @@ const { createHttpClient, sanitizeUrl } = require("../src/http-client");
 test("URL의 apiKey를 제거한다", () => {
   assert.equal(
     sanitizeUrl("https://api.example/path?apiKey=secret&x=1"),
-    "https://api.example/path?apiKey=%5BREDACTED%5D&x=1"
+    "https://api.example/path?x=1"
   );
 });
 
