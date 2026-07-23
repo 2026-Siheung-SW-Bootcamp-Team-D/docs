@@ -59,6 +59,20 @@ function requireJob(jobs, id) {
   return job;
 }
 
+function requireCompletedJob(job) {
+  if (
+    job?.status !== "SUCCEEDED" ||
+    !job.result ||
+    !Array.isArray(job.result.candidates) ||
+    !Array.isArray(job.result.participants)
+  ) {
+    const error = new Error("작업 계산이 완료되지 않았습니다.");
+    error.status = 409;
+    throw error;
+  }
+  return job;
+}
+
 function createAppServer({ providers, jobs }) {
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
@@ -74,7 +88,7 @@ function createAppServer({ providers, jobs }) {
 
       if (request.method === "GET" && url.pathname === "/api/venues/search") {
         const input = validateVenueSearch(url.searchParams);
-        const job = requireJob(jobs, input.jobId);
+        const job = requireCompletedJob(requireJob(jobs, input.jobId));
         let hub;
         try {
           hub = findHub(job, input.hubId);
@@ -135,7 +149,7 @@ function createAppServer({ providers, jobs }) {
         /^\/api\/jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/shortlist\/evaluate$/i
       );
       if (request.method === "POST" && shortlistEvaluateMatch) {
-        const job = requireJob(jobs, shortlistEvaluateMatch[1]);
+        const job = requireCompletedJob(requireJob(jobs, shortlistEvaluateMatch[1]));
         if (!job.shortlist.length) {
           throw new Error("공동 후보가 비어 있습니다.");
         }

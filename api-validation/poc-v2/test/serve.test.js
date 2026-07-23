@@ -35,6 +35,26 @@ function createMutableJobs(job) {
   };
 }
 
+function createIncompleteJob(id = "00000000-0000-4000-8000-000000000013") {
+  return {
+    id,
+    status: "RUNNING",
+    progress: { phase: "ISOCHRONE", done: 1, total: 2 },
+    result: null,
+    shortlist: [],
+    shortlistEvaluation: null,
+    shortlistCalls: [],
+  };
+}
+
+function createNotReadyJob(status, id, error = null) {
+  return {
+    ...createIncompleteJob(id),
+    status,
+    error,
+  };
+}
+
 test("정적 파일 경로를 allowlist로 제한한다", () => {
   assert.match(resolvePublicFile("/"), /poc-v2\/web\/index\.html$/);
   assert.match(resolvePublicFile("/report-data.json"), /poc-v2\/output\/report-data\.json$/);
@@ -176,6 +196,55 @@ test("장소 탐색부터 공동 후보 추가·투표·평가까지 HTTP로 처
   assert.equal(removed.shortlist.length, 0);
 });
 
+test("키워드 장소 탐색은 저장된 거점 좌표와 반경으로 Kakao 검색을 호출한다", async (context) => {
+  const job = createCompletedJob("00000000-0000-4000-8000-000000000014");
+  const calls = [];
+  const providers = {
+    kakaoKeyword: async (input) => {
+      calls.push(input);
+      return {
+        data: [
+          {
+            id: "venue-keyword-1",
+            name: "회의하기 좋은 카페",
+            category: "음식점 > 카페",
+            categoryGroupCode: "CE7",
+            phone: "",
+            address: "경기 안양시",
+            roadAddress: "",
+            lon: 126.93,
+            lat: 37.41,
+            url: "https://place.map.kakao.com/venue-keyword-1",
+            distanceMeters: 180,
+          },
+        ],
+        record: { provider: "KAKAO", status: 200 },
+      };
+    },
+  };
+  const server = createAppServer({ providers, jobs: createMutableJobs(job) });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => server.close());
+  const port = server.address().port;
+
+  const response = await fetch(
+    `http://127.0.0.1:${port}/api/venues/search?jobId=${job.id}&hubId=hub-1&query=${encodeURIComponent("카페")}&radius=1500`
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.places[0].name, "회의하기 좋은 카페");
+  assert.deepEqual(calls, [
+    {
+      query: "카페",
+      lon: 126.91,
+      lat: 37.4,
+      radius: 1500,
+      size: 15,
+    },
+  ]);
+});
+
 test("장소 탐색과 공동 후보 엔드포인트는 입력 오류와 상태 충돌을 구분한다", async (context) => {
   const job = createCompletedJob("00000000-0000-4000-8000-000000000011");
   const providers = {
@@ -309,4 +378,58 @@ test("장소 탐색과 공동 후보 엔드포인트는 입력 오류와 상태 
     { method: "POST" }
   );
   assert.equal(emptyEvaluation.status, 400);
+});
+
+test("계산이 끝나지 않은 작업은 장소 탐색과 공동 후보 평가를 409로 거부한다", async (context) => {
+  const jobs = new Map([
+    ["00000000-0000-4000-8000-000000000013", createNotReadyJob("QUEUED", "00000000-0000-4000-8000-000000000013")],
+    ["00000000-0000-4000-8000-000000000014", createNotReadyJob("RUNNING", "00000000-0000-4000-8000-000000000014")],
+    [
+      "00000000-0000-4000-8000-000000000015",
+      createNotReadyJob("FAILED", "00000000-0000-4000-8000-000000000015", {
+        message: "TMAP upstream failure",
+      }),
+    ],
+  ]);
+  const providers = {
+    kakaoKeyword: async () => {
+      throw new Error("provider should not be called");
+    },
+    kakaoCategory: async () => {
+      throw new Error("provider should not be called");
+    },
+    tmapTransit: async () => {
+      throw new Error("provider should not be called");
+    },
+  };
+  const server = createAppServer({
+    providers,
+    jobs: {
+      create: () => null,
+      get: (id) => jobs.get(id) || null,
+      update: () => null,
+    },
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => server.close());
+  const port = server.address().port;
+  const base = `http://127.0.0.1:${port}`;
+
+  for (const jobId of jobs.keys()) {
+    const venueSearch = await fetch(
+      `${base}/api/venues/search?jobId=${jobId}&hubId=hub-1&category=FD6&radius=1000`
+    );
+    assert.equal(venueSearch.status, 409);
+    assert.deepEqual(await venueSearch.json(), {
+      error: "작업 계산이 완료되지 않았습니다.",
+    });
+
+    const evaluation = await fetch(`${base}/api/jobs/${jobId}/shortlist/evaluate`, {
+      method: "POST",
+    });
+    assert.equal(evaluation.status, 409);
+    assert.deepEqual(await evaluation.json(), {
+      error: "작업 계산이 완료되지 않았습니다.",
+    });
+  }
 });
