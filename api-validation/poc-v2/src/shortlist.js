@@ -82,6 +82,7 @@ async function evaluateShortlist({
       const response = await providers.tmapTransit({
         start: participant,
         end: venue,
+        purpose: "SHORTLIST_TRANSIT_EVALUATION",
       });
       calls.push(response.record);
       routes.push({ participantId: participant.id, ...response.data });

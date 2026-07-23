@@ -36,6 +36,21 @@ test("429 후 재시도하고 호출 메타데이터만 기록한다", async () 
   assert.doesNotMatch(JSON.stringify(result.record), /secret/);
 });
 
+test("호출 기록은 목적과 비밀값 없는 파라미터 이름만 남긴다", async () => {
+  const client = createHttpClient({
+    fetchImpl: async () => new Response("{}", { status: 200 }),
+  });
+  const result = await client.json({
+    provider: "KAKAO",
+    purpose: "VENUE_CATEGORY_SEARCH",
+    url: "https://example.test/search?category=FD6&apiKey=secret",
+    parameterNames: ["category", "apiKey"],
+  });
+  assert.equal(result.record.purpose, "VENUE_CATEGORY_SEARCH");
+  assert.deepEqual(result.record.parameterNames, ["category"]);
+  assert.doesNotMatch(JSON.stringify(result.record), /secret|apiKey/);
+});
+
 test("JSON이 아닌 응답은 계약 오류로 거부한다", async () => {
   const client = createHttpClient({
     fetchImpl: async () => new Response("<html>bad gateway</html>", { status: 200 }),

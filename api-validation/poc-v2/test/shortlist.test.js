@@ -47,8 +47,8 @@ test("공동 후보는 중복과 5개 초과를 거부한다", () => {
 test("공동 후보만 참여자별 TMAP 시간으로 평가한다", async () => {
   const calls = [];
   const providers = {
-    tmapTransit: async ({ start, end }) => {
-      calls.push([start.id, end.id]);
+    tmapTransit: async ({ start, end, purpose }) => {
+      calls.push([start.id, end.id, purpose]);
       return {
         data: {
           status: "READY",
@@ -72,6 +72,10 @@ test("공동 후보만 참여자별 TMAP 시간으로 평가한다", async () =>
   });
 
   assert.equal(calls.length, 4);
+  assert.deepEqual(
+    calls.map(([, , purpose]) => purpose),
+    Array(4).fill("SHORTLIST_TRANSIT_EVALUATION")
+  );
   assert.equal(result.candidates[0].id, "1");
   assert.equal(result.candidates[0].metrics.maxSeconds, 1800);
 });

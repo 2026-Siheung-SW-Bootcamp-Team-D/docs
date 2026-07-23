@@ -83,7 +83,11 @@ function createAppServer({ providers, jobs }) {
         if (query.length < 2 || query.length > 50) {
           return sendJson(response, 400, { error: "검색어는 2~50자여야 합니다." });
         }
-        const result = await providers.kakaoKeyword({ query, size: 5 });
+        const result = await providers.kakaoKeyword({
+          query,
+          size: 5,
+          purpose: "ORIGIN_KEYWORD_SEARCH",
+        });
         return sendJson(response, 200, { places: result.data });
       }
 
@@ -103,6 +107,7 @@ function createAppServer({ providers, jobs }) {
               lon: hub.lon,
               lat: hub.lat,
               radius: input.radius,
+              purpose: "VENUE_CATEGORY_SEARCH",
             })
           : await providers.kakaoKeyword({
               query: input.query,
@@ -110,6 +115,7 @@ function createAppServer({ providers, jobs }) {
               lat: hub.lat,
               radius: input.radius,
               size: 15,
+              purpose: "VENUE_KEYWORD_SEARCH",
             });
         return sendJson(response, 200, {
           hub: { id: hub.id, name: hub.name, lon: hub.lon, lat: hub.lat },

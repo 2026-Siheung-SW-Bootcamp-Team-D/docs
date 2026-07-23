@@ -6,13 +6,32 @@ function sanitizeUrl(rawUrl) {
   return url.toString();
 }
 
+function sanitizeParameterNames(names = []) {
+  const blocked = new Set(["apikey", "appkey", "authorization", "key"]);
+  return names.reduce((filtered, name) => {
+    const value = String(name || "").trim();
+    if (!value || blocked.has(value.toLowerCase()) || filtered.includes(value)) {
+      return filtered;
+    }
+    return [...filtered, value];
+  }, []);
+}
+
 function createHttpClient({
   fetchImpl = fetch,
   timeoutMs = 10000,
   maxRetries = 3,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
-  async function json({ provider, url, method = "GET", headers = {}, body }) {
+  async function json({
+    provider,
+    purpose = "UNSPECIFIED",
+    url,
+    method = "GET",
+    headers = {},
+    body,
+    parameterNames = [],
+  }) {
     const startedAt = Date.now();
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
       let response;
@@ -51,8 +70,10 @@ function createHttpClient({
         body: parsed,
         record: {
           provider,
+          purpose: String(purpose),
           method,
           url: sanitizeUrl(url),
+          parameterNames: sanitizeParameterNames(parameterNames),
           status: response.status,
           attempts: attempt,
           durationMs: Date.now() - startedAt,

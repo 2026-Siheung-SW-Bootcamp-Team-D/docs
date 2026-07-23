@@ -55,6 +55,7 @@ function loadBrowserTestHooks({ fetchImpl }) {
     ["#venue-results", createElement("div")],
     ["#shortlist-panel", createElement("section")],
     ["#shortlist-matrix", createElement("table")],
+    ["#calls", createElement("table")],
   ]);
   elements.get("#shortlist-panel").hidden = false;
 
@@ -176,6 +177,37 @@ test("브라우저 코드는 안전한 외부 URL과 인코딩된 경로 조각�
     hooks.encodePathSegment("venue/1?group=a b"),
     "venue%2F1%3Fgroup%3Da%20b"
   );
+});
+
+test("호출 테이블은 목적과 안전한 URL만 escape 해서 렌더링한다", () => {
+  const { hooks, elements } = loadBrowserTestHooks({
+    fetchImpl: async () => ({ json: async () => ({ places: [] }) }),
+  });
+
+  hooks.renderCalls({
+    calls: [
+      {
+        purpose: "VENUE_CATEGORY_SEARCH",
+        provider: "KAKAO",
+        method: "GET",
+        url: "https://safe.example/path?<script>=1",
+        parameterNames: ["category", "<bad>"],
+        status: 200,
+        attempts: 1,
+        durationMs: 32,
+      },
+    ],
+  });
+
+  const html = elements.get("#calls").innerHTML;
+  assert.match(html, /목적/);
+  assert.match(html, /안전한 URL/);
+  assert.match(html, /파라미터/);
+  assert.match(html, /VENUE_CATEGORY_SEARCH/);
+  assert.match(html, /https:\/\/safe\.example\/path\?%3Cscript%3E=1/);
+  assert.match(html, /category, &lt;bad&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /<a /);
 });
 
 test("최신 장소 검색만 venue 상태와 지도를 갱신하고 오래된 응답은 무시한다", async () => {

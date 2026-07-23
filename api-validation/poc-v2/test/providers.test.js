@@ -22,6 +22,15 @@ test("Kakao 카테고리 검색은 거리순 장소 요청을 만든다", async 
   });
 
   const url = new URL(captured.url);
+  assert.equal(captured.purpose, "VENUE_CATEGORY_SEARCH");
+  assert.deepEqual(captured.parameterNames, [
+    "category_group_code",
+    "x",
+    "y",
+    "radius",
+    "sort",
+    "size",
+  ]);
   assert.equal(url.pathname, "/v2/local/search/category.json");
   assert.equal(url.searchParams.get("category_group_code"), "FD6");
   assert.equal(url.searchParams.get("x"), "126.9231");

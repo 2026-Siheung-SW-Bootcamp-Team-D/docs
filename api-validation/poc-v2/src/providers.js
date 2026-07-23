@@ -6,7 +6,14 @@ const {
 } = require("./contracts");
 
 function createProviders({ client, keys }) {
-  async function kakaoKeyword({ query, lon, lat, radius = 20000, size = 15 }) {
+  async function kakaoKeyword({
+    query,
+    lon,
+    lat,
+    radius = 20000,
+    size = 15,
+    purpose = "UNSPECIFIED",
+  }) {
     const url = new URL("https://dapi.kakao.com/v2/local/search/keyword.json");
     const params = {
       query,
@@ -20,13 +27,24 @@ function createProviders({ client, keys }) {
       .forEach(([key, value]) => url.searchParams.set(key, String(value)));
     const result = await client.json({
       provider: "KAKAO",
+      purpose,
       url: url.toString(),
       headers: { Authorization: `KakaoAK ${keys.kakao}` },
+      parameterNames: Object.entries(params)
+        .filter(([, value]) => value !== undefined)
+        .map(([key]) => key),
     });
     return { data: normalizeKakaoKeyword(result.body), record: result.record };
   }
 
-  async function kakaoCategory({ category, lon, lat, radius = 1000, size = 15 }) {
+  async function kakaoCategory({
+    category,
+    lon,
+    lat,
+    radius = 1000,
+    size = 15,
+    purpose = "VENUE_CATEGORY_SEARCH",
+  }) {
     const url = new URL("https://dapi.kakao.com/v2/local/search/category.json");
     const params = {
       category_group_code: category,
@@ -39,25 +57,29 @@ function createProviders({ client, keys }) {
     Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
     const result = await client.json({
       provider: "KAKAO",
+      purpose,
       url: url.toString(),
       headers: { Authorization: `KakaoAK ${keys.kakao}` },
+      parameterNames: Object.keys(params),
     });
     return { data: normalizeKakaoKeyword(result.body), record: result.record };
   }
 
-  async function kakaoAddress(query) {
+  async function kakaoAddress(query, purpose = "ADDRESS_SEARCH") {
     const url = new URL("https://dapi.kakao.com/v2/local/search/address.json");
     url.searchParams.set("query", query);
     url.searchParams.set("size", "5");
     const result = await client.json({
       provider: "KAKAO",
+      purpose,
       url: url.toString(),
       headers: { Authorization: `KakaoAK ${keys.kakao}` },
+      parameterNames: ["query", "size"],
     });
     return { data: normalizeKakaoAddress(result.body), record: result.record };
   }
 
-  async function odsayIsochrone({ lon, lat, minutes }) {
+  async function odsayIsochrone({ lon, lat, minutes, purpose = "TRANSIT_ISOCHRONE" }) {
     const url = new URL("https://api.odsay.com/v1/api/searchPubTransIsochrone");
     const params = {
       apiKey: keys.odsay,
@@ -67,13 +89,19 @@ function createProviders({ client, keys }) {
       searchMethod: 4,
     };
     Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
-    const result = await client.json({ provider: "ODSAY", url: url.toString() });
+    const result = await client.json({
+      provider: "ODSAY",
+      purpose,
+      url: url.toString(),
+      parameterNames: Object.keys(params),
+    });
     return { data: normalizeOdsayIsochrone(result.body), record: result.record };
   }
 
-  async function tmapTransit({ start, end }) {
+  async function tmapTransit({ start, end, purpose = "UNSPECIFIED" }) {
     const result = await client.json({
       provider: "TMAP",
+      purpose,
       url: "https://apis.openapi.sk.com/transit/routes/sub",
       method: "POST",
       headers: {
@@ -88,6 +116,7 @@ function createProviders({ client, keys }) {
         endY: String(end.lat),
         count: 1,
       },
+      parameterNames: ["startX", "startY", "endX", "endY", "count"],
     });
     return { data: normalizeTmapTransit(result.body), record: result.record };
   }

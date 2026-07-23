@@ -60,6 +60,7 @@ async function runScenario(scenario, providers, onProgress = () => {}) {
       lon: participant.lon,
       lat: participant.lat,
       minutes: scenario.minutes,
+      purpose: "TRANSIT_ISOCHRONE",
     });
     calls.push(response.record);
     if (response.data) isochrones.push(response.data);
@@ -99,6 +100,7 @@ async function runScenario(scenario, providers, onProgress = () => {}) {
         lat,
         radius: 20000,
         size: 15,
+        purpose: "HUB_KEYWORD_SEARCH",
       });
       calls.push(response.record);
       for (const place of response.data) candidateMap.set(place.id, place);
@@ -125,6 +127,7 @@ async function runScenario(scenario, providers, onProgress = () => {}) {
       const response = await providers.tmapTransit({
         start: participant,
         end: candidate,
+        purpose: "HUB_TRANSIT_EVALUATION",
       });
       calls.push(response.record);
       routes.push({ participantId: participant.id, ...response.data });

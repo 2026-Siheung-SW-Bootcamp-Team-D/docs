@@ -5,6 +5,7 @@ let activeHubId = null;
 let currentVenues = [];
 let currentShortlist = [];
 let currentShortlistEvaluation = null;
+let currentCallRecords = [];
 let activeVenueCategory = "FD6";
 let venueSearchToken = 0;
 
@@ -55,9 +56,11 @@ function resetVenueSearchState(message = "") {
   venueSearchToken += 1;
   currentVenues = [];
   currentShortlistEvaluation = null;
+  currentCallRecords = [];
   MeetingMap.renderVenues([]);
   renderVenueCards();
   renderShortlistMatrix();
+  renderActiveCalls();
   setVenueStatus(message);
   return venueSearchToken;
 }
@@ -185,17 +188,29 @@ function renderMatrix(scenario) {
 function renderCalls(scenario) {
   const calls = scenario.calls || [];
   document.querySelector("#calls").innerHTML = `
-    <thead><tr><th>공급자</th><th>HTTP</th><th>시도</th><th>시간</th><th>크기</th></tr></thead>
+    <thead><tr><th>목적</th><th>공급자</th><th>메서드</th><th>안전한 URL</th><th>파라미터</th><th>상태</th><th>시도</th><th>응답시간</th></tr></thead>
     <tbody>${calls.map((call) => `
       <tr>
+        <td>${escapeHtml(call.purpose)}</td>
         <td>${escapeHtml(call.provider)}</td>
-        <td>${call.status}</td>
-        <td>${call.attempts}</td>
-        <td>${call.durationMs}ms</td>
-        <td>${call.bytes}B</td>
+        <td>${escapeHtml(call.method)}</td>
+        <td>${escapeHtml(safeHttpUrl(call.url))}</td>
+        <td>${escapeHtml((call.parameterNames || []).join(", "))}</td>
+        <td>${escapeHtml(call.status)}</td>
+        <td>${escapeHtml(call.attempts)}</td>
+        <td>${escapeHtml(`${call.durationMs}ms`)}</td>
       </tr>
     `).join("")}</tbody>
   `;
+}
+
+function renderActiveCalls() {
+  renderCalls({
+    calls: [
+      ...(activeScenario?.calls || []),
+      ...currentCallRecords,
+    ],
+  });
 }
 
 function syncCategoryTabs() {
@@ -480,7 +495,12 @@ function renderScenario(scenario) {
   MeetingMap.renderScenario(scenario);
   renderRanking(scenario);
   renderMatrix(scenario);
-  renderCalls(scenario);
+  renderCalls({
+    calls: [
+      ...(scenario.calls || []),
+      ...(isActiveLiveScenario(scenario) ? currentCallRecords : []),
+    ],
+  });
   renderVenueExplorer(scenario);
 }
 
@@ -570,9 +590,11 @@ async function loadShortlist() {
   if (response.error) throw new Error(response.error);
   currentShortlist = Array.isArray(response.shortlist) ? response.shortlist : [];
   currentShortlistEvaluation = null;
+  currentCallRecords = [];
   MeetingMap.renderShortlist(currentShortlist);
   renderShortlist();
   renderShortlistMatrix();
+  renderActiveCalls();
 }
 
 async function searchVenues({ category = null, query = null }) {
@@ -600,9 +622,11 @@ async function searchVenues({ category = null, query = null }) {
     if (response.error) throw new Error(response.error);
 
     currentVenues = Array.isArray(response.places) ? response.places : [];
+    currentCallRecords = response.call ? [response.call] : [];
     MeetingMap.renderVenues(currentVenues);
     renderVenueCards();
     renderShortlistMatrix();
+    renderActiveCalls();
     setVenueStatus(
       currentVenues.length
         ? `${currentVenues.length}곳을 찾았습니다. 공동 후보에 담아 비교해 보세요.`
@@ -635,10 +659,12 @@ async function addVenueToShortlist(placeId) {
 
   currentShortlist = response.shortlist;
   currentShortlistEvaluation = null;
+  currentCallRecords = [];
   MeetingMap.renderShortlist(currentShortlist);
   renderVenueCards();
   renderShortlist();
   renderShortlistMatrix();
+  renderActiveCalls();
   setVenueStatus("공동 후보에 추가했습니다.");
 }
 
@@ -651,10 +677,12 @@ async function removeVenueFromShortlist(placeId) {
 
   currentShortlist = response.shortlist;
   currentShortlistEvaluation = null;
+  currentCallRecords = [];
   MeetingMap.renderShortlist(currentShortlist);
   renderVenueCards();
   renderShortlist();
   renderShortlistMatrix();
+  renderActiveCalls();
   setVenueStatus("공동 후보에서 제거했습니다.");
 }
 
@@ -667,10 +695,12 @@ async function toggleShortlistVote(placeId) {
 
   currentShortlist = response.shortlist;
   currentShortlistEvaluation = null;
+  currentCallRecords = [];
   MeetingMap.renderShortlist(currentShortlist);
   renderVenueCards();
   renderShortlist();
   renderShortlistMatrix();
+  renderActiveCalls();
   setVenueStatus("팀 투표를 업데이트했습니다.");
 }
 
@@ -686,7 +716,9 @@ async function evaluateShortlist() {
   if (response.error) throw new Error(response.error);
 
   currentShortlistEvaluation = response.candidates;
+  currentCallRecords = Array.isArray(response.calls) ? response.calls : [];
   renderShortlistMatrix();
+  renderActiveCalls();
   setVenueStatus("실제 이동시간 비교를 업데이트했습니다.");
 }
 
@@ -789,6 +821,7 @@ async function pollJob(jobId) {
       currentVenues = [];
       currentShortlist = [];
       currentShortlistEvaluation = null;
+      currentCallRecords = [];
       renderScenario(job.result);
       renderVenueExplorer(job.result);
       await loadShortlist();
@@ -848,6 +881,7 @@ if (teamdWebTest) {
   Object.assign(teamdWebTest, {
     safeHttpUrl,
     encodePathSegment,
+    renderCalls,
     searchVenues,
     setVenueTestState({
       activeJobId: nextActiveJobId = activeJobId,
