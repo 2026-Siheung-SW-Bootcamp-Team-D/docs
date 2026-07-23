@@ -5,19 +5,33 @@ function requireValue(value, field) {
   return value;
 }
 
-function normalizeKakaoKeyword(body) {
-  if (!Array.isArray(body.documents)) throw new Error("계약 위반: documents");
-  return body.documents.map((doc) => ({
+function normalizeKakaoPlace(doc) {
+  const lon = Number(requireValue(doc.x, "documents[].x"));
+  const lat = Number(requireValue(doc.y, "documents[].y"));
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    throw new Error("계약 위반: documents[].x/y 숫자");
+  }
+  return Object.freeze({
     id: String(requireValue(doc.id, "documents[].id")),
     name: String(requireValue(doc.place_name, "documents[].place_name")),
     category: String(doc.category_name || ""),
+    categoryGroupCode: String(doc.category_group_code || ""),
+    phone: String(doc.phone || ""),
     address: String(doc.address_name || ""),
     roadAddress: String(doc.road_address_name || ""),
-    lon: Number(requireValue(doc.x, "documents[].x")),
-    lat: Number(requireValue(doc.y, "documents[].y")),
+    lon,
+    lat,
     url: String(doc.place_url || ""),
-    distanceMeters: doc.distance === undefined ? null : Number(doc.distance),
-  }));
+    distanceMeters:
+      doc.distance === undefined || doc.distance === ""
+        ? null
+        : Number(doc.distance),
+  });
+}
+
+function normalizeKakaoKeyword(body) {
+  if (!Array.isArray(body.documents)) throw new Error("계약 위반: documents");
+  return body.documents.map(normalizeKakaoPlace);
 }
 
 function normalizeKakaoAddress(body) {
