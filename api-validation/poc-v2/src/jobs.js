@@ -42,6 +42,14 @@ function validateScenario(input) {
 function createJobStore({ runner, providers }) {
   const jobs = new Map();
 
+  function update(id, updater) {
+    const job = jobs.get(id);
+    if (!job) return null;
+    const next = updater(job);
+    jobs.set(id, next);
+    return next;
+  }
+
   function create(input) {
     const scenario = validateScenario(input);
     const job = {
@@ -51,18 +59,28 @@ function createJobStore({ runner, providers }) {
       result: null,
       error: null,
       createdAt: new Date().toISOString(),
+      shortlist: [],
+      shortlistEvaluation: null,
+      shortlistCalls: [],
     };
     jobs.set(job.id, job);
     setImmediate(async () => {
-      job.status = "RUNNING";
+      update(job.id, (current) => ({ ...current, status: "RUNNING" }));
       try {
-        job.result = await runner(scenario, providers, (progress) => {
-          job.progress = progress;
+        const result = await runner(scenario, providers, (progress) => {
+          update(job.id, (current) => ({ ...current, progress }));
         });
-        job.status = job.result.status;
+        update(job.id, (current) => ({
+          ...current,
+          result,
+          status: result.status,
+        }));
       } catch (error) {
-        job.status = "FAILED";
-        job.error = { message: error.message };
+        update(job.id, (current) => ({
+          ...current,
+          status: "FAILED",
+          error: { message: error.message },
+        }));
       }
     });
     return { id: job.id, status: job.status };
@@ -72,7 +90,7 @@ function createJobStore({ runner, providers }) {
     return jobs.get(id) || null;
   }
 
-  return Object.freeze({ create, get });
+  return Object.freeze({ create, get, update });
 }
 
 module.exports = { validateScenario, createJobStore };

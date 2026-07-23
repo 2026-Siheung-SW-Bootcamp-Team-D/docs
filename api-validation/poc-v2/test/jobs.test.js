@@ -64,3 +64,32 @@ test("작업 진행률과 성공 결과를 보존한다", async () => {
   assert.equal(completed.status, "SUCCEEDED");
   assert.equal(completed.progress.phase, "TRANSIT_EVALUATION");
 });
+
+test("작업 저장소는 공동 후보 상태를 초기화하고 update로 불변 갱신한다", () => {
+  const store = createJobStore({
+    runner: async () => ({ status: "SUCCEEDED", candidates: [] }),
+    providers: {},
+  });
+  const created = store.create({
+    title: "직접 실험",
+    minutes: 45,
+    participants: [
+      { label: "정왕역", lon: 126.742616, lat: 37.345955 },
+      { label: "강남역", lon: 127.027619, lat: 37.497942 },
+    ],
+  });
+
+  const before = store.get(created.id);
+  assert.deepEqual(before.shortlist, []);
+  assert.equal(before.shortlistEvaluation, null);
+  assert.deepEqual(before.shortlistCalls, []);
+
+  const updated = store.update(created.id, (job) => ({
+    ...job,
+    shortlist: [{ id: "1", vote: 0 }],
+  }));
+
+  assert.notEqual(updated, before);
+  assert.deepEqual(before.shortlist, []);
+  assert.deepEqual(updated.shortlist, [{ id: "1", vote: 0 }]);
+});
