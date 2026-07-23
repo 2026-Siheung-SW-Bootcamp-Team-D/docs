@@ -1,7 +1,4 @@
 let report = { generatedAt: null, status: "NOT_RUN", scenarios: [] };
-let map;
-let layers = [];
-const colors = ["#2557d6", "#f39c12", "#8e44ad", "#16a085", "#d35400"];
 const customParticipants = [
   { label: "", lon: null, lat: null },
   { label: "", lon: null, lat: null },
@@ -18,11 +15,6 @@ function escapeHtml(value) {
 
 const minutes = (seconds) =>
   Number.isFinite(seconds) ? `${Math.round(seconds / 60)}분` : "N/A";
-
-function clearLayers() {
-  layers.forEach((layer) => layer.remove());
-  layers = [];
-}
 
 function bindScenarioTab(button, scenario) {
   button.addEventListener("click", () => renderScenario(scenario));
@@ -55,41 +47,6 @@ function renderStatus(scenario) {
       `<div class="status-card${good ? " good" : ""}">${escapeHtml(label)}<strong>${escapeHtml(value)}</strong></div>`
     )
     .join("");
-}
-
-function renderMap(scenario) {
-  clearLayers();
-  (scenario.isochrones || []).forEach((geojson, index) => {
-    const label = scenario.participants?.[index]?.label || `참여자 ${index + 1}`;
-    const layer = L.geoJSON(geojson, {
-      style: { color: colors[index], weight: 2, fillOpacity: .09 },
-    }).bindTooltip(escapeHtml(`${label} 도달권`));
-    layer.addTo(map);
-    layers.push(layer);
-  });
-  if (scenario.intersection) {
-    const layer = L.geoJSON(scenario.intersection, {
-      style: { color: "#e35353", weight: 3, fillOpacity: .22 },
-    }).bindTooltip("모두의 공통 도달 영역");
-    layer.addTo(map);
-    layers.push(layer);
-  }
-  (scenario.candidates || []).forEach((candidate) => {
-    const marker = L.marker([candidate.lat, candidate.lon])
-      .addTo(map)
-      .bindPopup(
-        `<strong>${candidate.rank}. ${escapeHtml(candidate.name)}</strong><br>${escapeHtml(candidate.roadAddress || candidate.address || "")}`
-      );
-    layers.push(marker);
-  });
-  if (layers.length) {
-    const group = L.featureGroup(layers);
-    if (group.getBounds().isValid()) {
-      map.fitBounds(group.getBounds(), { padding: [24, 24], maxZoom: 12 });
-    }
-  } else {
-    map.setView([37.45, 126.9], 8);
-  }
 }
 
 function renderRanking(scenario) {
@@ -162,7 +119,7 @@ function renderScenario(scenario) {
     button.classList.toggle("active", button.dataset.id === scenario.id)
   );
   renderStatus(scenario);
-  renderMap(scenario);
+  MeetingMap.renderScenario(scenario);
   renderRanking(scenario);
   renderMatrix(scenario);
   renderCalls(scenario);
@@ -316,11 +273,7 @@ function bindInteractiveLab() {
 }
 
 async function boot() {
-  map = L.map("map", { zoomControl: true }).setView([37.45, 126.9], 8);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "© OpenStreetMap",
-  }).addTo(map);
+  MeetingMap.create("map");
   bindInteractiveLab();
 
   try {

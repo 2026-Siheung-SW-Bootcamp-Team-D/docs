@@ -19,6 +19,7 @@ function resolvePublicFile(urlPath) {
   const routes = {
     "/": path.join(root, "web", "index.html"),
     "/app.js": path.join(root, "web", "app.js"),
+    "/map-adapter.js": path.join(root, "web", "map-adapter.js"),
     "/styles.css": path.join(root, "web", "styles.css"),
     "/report-data.json": path.join(root, "output", "report-data.json"),
   };

@@ -57,6 +57,7 @@ function createNotReadyJob(status, id, error = null) {
 
 test("정적 파일 경로를 allowlist로 제한한다", () => {
   assert.match(resolvePublicFile("/"), /poc-v2\/web\/index\.html$/);
+  assert.match(resolvePublicFile("/map-adapter.js"), /poc-v2\/web\/map-adapter\.js$/);
   assert.match(resolvePublicFile("/report-data.json"), /poc-v2\/output\/report-data\.json$/);
   assert.equal(resolvePublicFile("/../config.js"), null);
 });
