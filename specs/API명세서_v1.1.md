@@ -25,7 +25,8 @@
 - 후보 장소 목록 조회와 보관 처리
 - 후보 장소 좋아요 on/off
 - 후보 장소 댓글 생성·목록·삭제
-- 방장의 현재 선택 장소 지정·변경·해제
+- 모든 참여자의 현재 선택 장소 지정·변경·해제
+- 모든 참여자의 참여 코드·초대 링크 상시 조회
 - ODsay + JTS + Kakao 기반 지역 제안 비동기 작업
 
 ### 1.2 canonical 범위에서 제거
@@ -153,8 +154,10 @@ Authorization: Bearer ptc_01HABC....{secret}
   "name": "금요일 저녁 약속",
   "purpose": "강남에서 식사",
   "status": "OPEN",
-  "hostParticipantId": "ptc_01J...",
+  "creatorParticipantId": "ptc_01J...",
   "selectedPlaceId": "plc_01J...",
+  "selectedByParticipantId": "ptc_01K...",
+  "selectedAt": "2026-07-23T19:30:00+09:00",
   "inviteCode": "b6f8m2",
   "createdAt": "2026-07-23T19:00:00+09:00",
   "updatedAt": "2026-07-23T19:30:00+09:00"
@@ -163,6 +166,8 @@ Authorization: Bearer ptc_01HABC....{secret}
 
 - `status`: `OPEN`, `CLOSED`
 - `selectedPlaceId`: `null` 또는 활성 후보 장소 1개
+- `creatorParticipantId`는 생성 이력일 뿐 권한 판정에 사용하지 않는다.
+- `selectedByParticipantId`, `selectedAt`은 마지막 선택 변경자와 시각이다.
 
 ### 3.2 Participant
 
@@ -170,7 +175,7 @@ Authorization: Bearer ptc_01HABC....{secret}
 {
   "participantId": "ptc_01J...",
   "nickname": "민지",
-  "role": "HOST",
+  "isCreator": true,
   "origin": {
     "label": "성수역",
     "lon": 127.0557,
@@ -181,7 +186,7 @@ Authorization: Bearer ptc_01HABC....{secret}
 }
 ```
 
-- `role`: `HOST`, `MEMBER`
+- `isCreator`는 개설자 표시용 메타데이터이며 모든 참여자의 기능 권한은 같다.
 - 다른 참여자에게는 상세 출발지를 숨길 수 있다. canonical 기본값은 `originSet`만 공개하고, 본인 응답에서만 `origin` 전체를 내려준다.
 
 ### 3.3 Place
@@ -237,8 +242,8 @@ Authorization: Bearer ptc_01HABC....{secret}
 |---:|---|---|---|---|
 | 1 | POST | `/boards` | 없음 | 보드 생성 |
 | 2 | GET | `/boards/{boardId}` | 참여자 | 보드 조회 |
-| 3 | PATCH | `/boards/{boardId}` | 호스트 | 보드 정보 수정 또는 닫기 |
-| 4 | GET | `/boards/{boardId}/invitation` | 호스트 | 초대 정보 조회 |
+| 3 | PATCH | `/boards/{boardId}` | 참여자 | 보드 기본 정보 수정 |
+| 4 | GET | `/boards/{boardId}/invitation` | 참여자 | 참여 코드·초대 링크 조회 |
 | 5 | GET | `/invitations/{inviteCode}` | 없음 | 초대 코드 확인 |
 | 6 | POST | `/invitations/{inviteCode}/participants` | 없음 | 보드 참여 |
 | 7 | GET | `/boards/{boardId}/participants` | 참여자 | 참여자 목록 |
@@ -248,28 +253,28 @@ Authorization: Bearer ptc_01HABC....{secret}
 | 11 | GET | `/boards/{boardId}/search/reverse-geocode` | 참여자 | 좌표 주소 조회 |
 | 12 | POST | `/boards/{boardId}/places` | 참여자 | 후보 장소 추가 |
 | 13 | GET | `/boards/{boardId}/places` | 참여자 | 후보 장소 목록 조회 |
-| 14 | DELETE | `/boards/{boardId}/places/{placeId}` | 제안자·호스트 | 후보 장소 보관 처리 |
+| 14 | DELETE | `/boards/{boardId}/places/{placeId}` | 참여자 | 후보 장소 보관 처리 |
 | 15 | PUT | `/boards/{boardId}/places/{placeId}/likes/me` | 참여자 | 좋아요 켜기 |
 | 16 | DELETE | `/boards/{boardId}/places/{placeId}/likes/me` | 참여자 | 좋아요 끄기 |
 | 17 | GET | `/boards/{boardId}/places/{placeId}/comments` | 참여자 | 댓글 목록 |
 | 18 | POST | `/boards/{boardId}/places/{placeId}/comments` | 참여자 | 댓글 생성 |
 | 19 | DELETE | `/boards/{boardId}/places/{placeId}/comments/{commentId}` | 작성자 | 댓글 삭제 |
-| 20 | PUT | `/boards/{boardId}/selected-place` | 호스트 | 현재 선택 장소 지정·변경 |
-| 21 | DELETE | `/boards/{boardId}/selected-place` | 호스트 | 현재 선택 장소 해제 |
-| 22 | POST | `/boards/{boardId}/area-search-jobs` | 호스트 | 지역 제안 작업 시작 |
+| 20 | PUT | `/boards/{boardId}/selected-place` | 참여자 | 현재 선택 장소 지정·변경 |
+| 21 | DELETE | `/boards/{boardId}/selected-place` | 참여자 | 현재 선택 장소 해제 |
+| 22 | POST | `/boards/{boardId}/area-search-jobs` | 참여자 | 지역 제안 작업 시작 |
 | 23 | GET | `/boards/{boardId}/area-search-jobs/{jobId}` | 참여자 | 작업 상태·결과 조회 |
 
 ## 5. 보드·초대·참여자
 
 ### 5.1 POST /boards
 
-보드와 호스트 참여자를 함께 생성한다.
+보드와 개설자 참여자를 함께 생성한다. 개설자 표시는 권한 차이를 만들지 않는다.
 
 ```json
 {
   "name": "금요일 저녁 약속",
   "purpose": "강남에서 식사",
-  "hostNickname": "종민"
+  "creatorNickname": "종민"
 }
 ```
 
@@ -277,7 +282,7 @@ Authorization: Bearer ptc_01HABC....{secret}
 
 - `name`: 2~40자
 - `purpose`: 0~100자
-- `hostNickname`: 1~20자
+- `creatorNickname`: 1~20자
 
 응답 `201 Created`:
 
@@ -288,14 +293,14 @@ Authorization: Bearer ptc_01HABC....{secret}
     "name": "금요일 저녁 약속",
     "purpose": "강남에서 식사",
     "status": "OPEN",
-    "hostParticipantId": "ptc_01J...",
+    "creatorParticipantId": "ptc_01J...",
     "selectedPlaceId": null,
     "inviteCode": "b6f8m2"
   },
-  "hostParticipant": {
+  "creatorParticipant": {
     "participantId": "ptc_01J...",
     "nickname": "종민",
-    "role": "HOST"
+    "isCreator": true
   },
   "tokens": {
     "participantToken": "ptc_01J....secret"
@@ -314,8 +319,10 @@ Authorization: Bearer ptc_01HABC....{secret}
     "name": "금요일 저녁 약속",
     "purpose": "강남에서 식사",
     "status": "OPEN",
-    "hostParticipantId": "ptc_01J...",
-    "selectedPlaceId": "plc_01J..."
+    "creatorParticipantId": "ptc_01J...",
+    "selectedPlaceId": "plc_01J...",
+    "selectedByParticipantId": "ptc_01K...",
+    "selectedAt": "2026-07-23T19:30:00+09:00"
   },
   "selectedPlace": {
     "placeId": "plc_01J...",
@@ -330,20 +337,20 @@ Authorization: Bearer ptc_01HABC....{secret}
 
 ### 5.3 PATCH /boards/{boardId}
 
-호스트만 수정 가능하다.
+모든 참여자가 수정할 수 있다. 보드 폐쇄는 MVP API에서 제공하지 않는다.
 
 ```json
 {
   "name": "토요일 점심 약속",
-  "purpose": "분위기 좋은 카페",
-  "status": "CLOSED"
+  "purpose": "분위기 좋은 카페"
 }
 ```
 
-- `status`는 `OPEN -> CLOSED` 전환만 허용하는 구현을 권장한다.
-- 닫힌 보드는 읽기만 가능하다.
+- 마지막으로 성공한 수정 요청이 현재 보드 정보가 된다.
 
 ### 5.4 GET /boards/{boardId}/invitation
+
+보드에 참여한 사람은 누구나 언제든 호출할 수 있다. 보드 화면은 이 값의 확인·복사 진입점을 항상 제공한다.
 
 ```json
 {
@@ -378,7 +385,7 @@ Authorization: Bearer ptc_01HABC....{secret}
   "participant": {
     "participantId": "ptc_01J...",
     "nickname": "민지",
-    "role": "MEMBER"
+    "isCreator": false
   },
   "tokens": {
     "participantToken": "ptc_01J....secret"
@@ -394,14 +401,14 @@ Authorization: Bearer ptc_01HABC....{secret}
     {
       "participantId": "ptc_01J...",
       "nickname": "종민",
-      "role": "HOST",
+      "isCreator": true,
       "isMe": false,
       "originSet": true
     },
     {
       "participantId": "ptc_01J...2",
       "nickname": "민지",
-      "role": "MEMBER",
+      "isCreator": false,
       "isMe": true,
       "originSet": true,
       "origin": {
@@ -600,14 +607,14 @@ GET /api/v1/boards/brd_01J.../places?status=ACTIVE&page=1&size=20
 
 물리 삭제 대신 보관 처리한다.
 
-- 권한: 호스트 또는 해당 장소 생성자
+- 권한: 보드 참여자
 - 이미 보관된 장소를 다시 삭제해도 `204 No Content`로 멱등 처리 가능
 - 선택된 장소를 보관하면 같은 트랜잭션에서 `selectedPlaceId`를 `null`로 해제한다.
 - 보관된 장소에는 좋아요 추가, 댓글 생성, 선택 지정이 불가하다.
 
 ## 8. 좋아요
 
-참여자 1명은 장소 1개에 최대 1개의 좋아요만 가진다.
+참여자 1명은 장소 1개에 최대 1개의 좋아요만 가진다. 서로 다른 여러 장소에는 각각 좋아요를 남길 수 있다.
 
 ### 8.1 PUT /boards/{boardId}/places/{placeId}/likes/me
 
@@ -664,7 +671,7 @@ GET /api/v1/boards/brd_01J.../places?status=ACTIVE&page=1&size=20
 
 ## 10. 현재 선택 장소
 
-현재 선택 장소는 보드가 가리키는 후보 1개다. 별도 장소 종류를 만들지 않는다.
+현재 선택 장소는 보드가 가리키는 후보 1개다. 별도 장소 종류를 만들지 않으며 모든 참여자가 변경할 수 있다.
 
 ### 10.1 PUT /boards/{boardId}/selected-place
 
@@ -676,15 +683,16 @@ GET /api/v1/boards/brd_01J.../places?status=ACTIVE&page=1&size=20
 
 규칙:
 
-- 권한: 호스트만 허용
+- 권한: 보드 참여자
 - 같은 보드의 `ACTIVE` 장소만 지정 가능
-- 이미 같은 장소가 선택된 경우 `204 No Content` 또는 `200 OK`로 멱등 처리 가능
-- 성공 응답은 최신 `board` 또는 `selectedPlace` 요약을 반환하는 것을 권장한다.
+- 이미 같은 장소가 같은 참여자에 의해 선택된 경우 멱등 처리한다.
+- 동시 변경은 커밋 순서 기준 last-write-wins이며 `selectedByParticipantId`, `selectedAt`을 갱신한다.
+- 성공 응답은 최신 `board`, `selectedPlace`, 마지막 변경자 요약을 반환한다.
 
 ### 10.2 DELETE /boards/{boardId}/selected-place
 
-- 권한: 호스트만 허용
-- 이미 선택이 없어도 `204 No Content`
+- 권한: 보드 참여자
+- 이미 선택이 없어도 성공 처리하고 마지막 변경자와 시각을 갱신한다.
 
 ## 11. 지역 제안 작업
 
@@ -700,7 +708,7 @@ GET /api/v1/boards/brd_01J.../places?status=ACTIVE&page=1&size=20
 
 규칙:
 
-- 권한: 호스트만 허용
+- 권한: 보드 참여자
 - 허용 값: `30`, `45`, `60`
 - 계산 시작 시점의 활성 참여자와 출발지 스냅샷을 작업에 저장
 - 출발지가 하나라도 없으면 `ORIGIN_REQUIRED`

@@ -18,7 +18,8 @@
 4. 장소 저장 모델은 공급자 중립적이어야 하며 특정 지도 API에 종속된 테이블을 두지 않는다.
 5. 장소 삭제는 물리 삭제 대신 `ACTIVE` / `ARCHIVED` 상태 전환으로 처리한다.
 6. 좋아요는 `(place_id, participant_id)` 유일성으로 멱등 보장한다.
-7. 정식 투표, 코스, 출발 계산, 공개 토큰용 canonical 테이블은 유지하지 않는다.
+7. 개설자는 이력 메타데이터일 뿐 기능 권한에 사용하지 않는다.
+8. 정식 투표, 코스, 출발 계산, 공개 토큰용 canonical 테이블은 유지하지 않는다.
 
 ## 1. 전체 관계도
 
@@ -49,13 +50,17 @@ erDiagram
 | public_id | text | unique, not null | `brd_` + ULID |
 | name | text | not null | 2~40자 |
 | status | text | not null, default 'OPEN' | `OPEN` / `CLOSED` |
-| host_participant_id | bigint | FK participant, null | 생성 직후 host 연결 전까지 null 허용 가능 |
+| creator_participant_id | bigint | FK participant, null | 생성 직후 개설자 연결 전까지 null 허용 |
 | selected_place_id | bigint | nullable FK place | 현재 선택 장소 |
+| selected_by_participant_id | bigint | nullable FK participant | 마지막 선택 변경자 |
+| selected_at | timestamptz | null | 마지막 선택 변경 시각 |
+| invite_code | text | unique, not null | 참여자가 상시 확인하는 참여 코드 |
 | closed_at | timestamptz | null | 보관 시각 |
 
 제약:
 - `check (status in ('OPEN','CLOSED'))`
 - `selected_place_id`는 같은 보드의 장소만 가리켜야 하므로 `foreign key (selected_place_id, id) references place (id, board_id)`로 강제한다.
+- `creator_participant_id`, `selected_by_participant_id`는 같은 보드의 참여자만 가리키도록 애플리케이션 트랜잭션에서 확인한다.
 - 선택 대상은 `ACTIVE` 장소만 허용하며, 이는 애플리케이션 트랜잭션에서 확인한다.
 
 ### 2.2 participant
@@ -65,16 +70,13 @@ erDiagram
 | public_id | text | unique, not null | `ptc_` + ULID |
 | board_id | bigint | FK board, not null | |
 | nickname | text | not null | 1~20자 |
-| role | text | not null | `HOST` / `MEMBER` |
 | token_hash | text | not null | 참여 토큰 해시 |
 | active | boolean | not null, default true | 비활성 참여자 구분 |
 | origin_label | text | null | 표시용 요약 |
 | origin_ciphertext | bytea | null | 암호화된 출발지 좌표/원문 |
 | origin_source | text | null | `KAKAO`, `NAVER`, `EXTERNAL`, `MANUAL` 등 |
 
-제약:
-- `check (role in ('HOST','MEMBER'))`
-- 보드당 활성 HOST는 정확히 1명이어야 하므로 `unique index ... where role = 'HOST' and active = true`
+개설자 여부는 `board.creator_participant_id`와 비교해 파생하며 별도 권한 역할 컬럼을 두지 않는다.
 
 ### 2.3 place
 
@@ -131,7 +133,7 @@ erDiagram
 |---|---|---|---|
 | public_id | text | unique, not null | `job_` + ULID |
 | board_id | bigint | FK board, not null | |
-| requester_id | bigint | FK participant, not null | HOST 요청자 |
+| requester_id | bigint | FK participant, not null | 작업을 시작한 참여자 |
 | status | text | not null, default 'QUEUED' | `QUEUED` / `RUNNING` / `SUCCEEDED` / `FAILED` |
 | duration_min | int | not null | 30 / 45 / 60 |
 | participant_snapshot | jsonb | not null | 참여자 ID 목록과 입력 스냅샷 |
@@ -167,10 +169,6 @@ erDiagram
 FK 컬럼은 전부 인덱스를 생성한다. 추가 인덱스는 아래를 기준으로 한다.
 
 ```sql
-create unique index ux_participant_host_per_board
-    on participant (board_id)
-    where role = 'HOST' and active = true;
-
 create unique index ux_place_like_unique
     on place_like (place_id, participant_id);
 
@@ -203,7 +201,7 @@ create unique index ux_area_suggestion_rank
 3. `ARCHIVED` 장소에는 새 좋아요, 댓글, 선택 지정을 허용하지 않는다.
 4. `place_like.participant_id`와 `place.proposer_id`는 같은 `board_id` 소속 참여자여야 한다.
 5. `place_comment.author_id`도 같은 보드 참여자여야 한다.
-6. `area_search_job.requester_id`는 HOST여야 한다.
+6. `area_search_job.requester_id`는 같은 보드의 활성 참여자여야 한다.
 7. 출발지 평문 좌표는 어떤 테이블에도 별도 컬럼으로 저장하지 않는다.
 
 ## 5. 선택/삭제 트랜잭션
@@ -212,17 +210,20 @@ create unique index ux_area_suggestion_rank
 
 1. `board` 행을 `FOR UPDATE`로 잠근다.
 2. 대상 `place`가 같은 보드에 속하고 `status = 'ACTIVE'`인지 확인한다.
-3. `update board set selected_place_id = :placeId, updated_at = now() where id = :boardId`
-4. 커밋 후 조회 응답에서 `selectedPlaceId`를 반환한다.
+3. 요청자가 같은 보드의 활성 참여자인지 확인한다.
+4. `update board set selected_place_id = :placeId, selected_by_participant_id = :participantId, selected_at = now(), updated_at = now() where id = :boardId`
+5. 동시에 여러 요청이 오면 잠금 획득 후 마지막으로 커밋된 변경을 현재 상태로 삼는다.
+6. 응답에서 `selectedPlaceId`, `selectedByParticipantId`, `selectedAt`을 반환한다.
 
 ### 5.2 선택된 장소 삭제(보관)
 
 1. 트랜잭션 시작
 2. `board` 행을 `FOR UPDATE`로 잠근다.
-3. `place` 행을 조회해 같은 보드와 삭제 권한을 확인한다.
-4. `board.selected_place_id = :placeId`면 먼저 `selected_place_id = null`로 갱신한다.
-5. `update place set status = 'ARCHIVED', archived_at = now(), updated_at = now() where id = :placeId`
-6. 커밋
+3. 요청자가 같은 보드의 활성 참여자인지 확인한다.
+4. `place` 행을 조회해 같은 보드인지 확인한다.
+5. `board.selected_place_id = :placeId`면 먼저 `selected_place_id = null`, 변경자·시각을 갱신한다.
+6. `update place set status = 'ARCHIVED', archived_at = now(), updated_at = now() where id = :placeId`
+7. 커밋
 
 이 순서를 고정해 선택 포인터가 보관된 장소를 가리키는 상태를 막는다.
 
