@@ -1,8 +1,13 @@
 function sanitizeUrl(rawUrl) {
   const url = new URL(rawUrl);
-  for (const key of ["apiKey", "appKey", "key"]) {
-    url.searchParams.delete(key);
+  const sanitizedParams = new URLSearchParams();
+  const blocked = new Set(["apikey", "appkey", "key", "authorization"]);
+  for (const [key, value] of url.searchParams.entries()) {
+    if (!blocked.has(key.toLowerCase())) {
+      sanitizedParams.append(key, value);
+    }
   }
+  url.search = sanitizedParams.toString();
   return url.toString();
 }
 

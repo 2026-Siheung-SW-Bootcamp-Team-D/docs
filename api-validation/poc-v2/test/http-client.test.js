@@ -9,6 +9,15 @@ test("URL의 apiKey를 제거한다", () => {
   );
 });
 
+test("URL의 비밀 쿼리 키를 대소문자와 무관하게 제거하고 일반 파라미터는 유지한다", () => {
+  assert.equal(
+    sanitizeUrl(
+      "https://api.example/path?Authorization=bearer&apikey=one&AppKey=two&keep=ok"
+    ),
+    "https://api.example/path?keep=ok"
+  );
+});
+
 test("429 후 재시도하고 호출 메타데이터만 기록한다", async () => {
   let count = 0;
   const fetchImpl = async () => {
