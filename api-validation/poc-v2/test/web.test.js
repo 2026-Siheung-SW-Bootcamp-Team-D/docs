@@ -23,10 +23,29 @@ test("HTML에 인터랙티브 입력과 결과 영역이 모두 있다", () => {
   }
 });
 
+test("HTML에 장소 탐색과 공동 후보 영역이 모두 있다", () => {
+  const html = web("index.html");
+  for (const id of [
+    "venue-explorer",
+    "hub-select",
+    "venue-category-tabs",
+    "venue-query",
+    "search-venues",
+    "venue-results",
+    "shortlist",
+    "evaluate-shortlist",
+    "shortlist-matrix",
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+});
+
 test("브라우저 코드는 서버 작업 API를 사용하고 HTML escape를 적용한다", () => {
   const app = web("app.js");
   assert.match(app, /\/api\/origins\/search/);
   assert.match(app, /\/api\/jobs/);
+  assert.match(app, /\/api\/venues\/search/);
+  assert.match(app, /\/shortlist/);
   assert.match(app, /escapeHtml/);
   assert.doesNotMatch(app, /KAKAO_REST_KEY|ODSAY_KEY|TMAP_APP_KEY/);
 });

@@ -99,6 +99,50 @@
       <div class="table-wrap"><table id="matrix"></table></div>
     </section>
 
+    <section class="panel" id="venue-explorer" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow dark">VENUE DISCOVERY</p>
+          <h2>이 지역에서 어디로 갈까요?</h2>
+          <p>공정한 지역을 선택하고 실제 약속 장소를 함께 모아보세요.</p>
+        </div>
+        <label class="duration-field">추천 지역
+          <select id="hub-select"></select>
+        </label>
+      </div>
+      <div id="venue-category-tabs" class="category-tabs" role="tablist" aria-label="장소 카테고리">
+        <button type="button" data-category="FD6">음식점</button>
+        <button type="button" data-category="CE7">카페</button>
+        <button type="button" data-category="CT1">문화시설</button>
+        <button type="button" data-category="AT4">관광명소</button>
+      </div>
+      <div class="venue-search">
+        <input
+          id="venue-query"
+          type="search"
+          maxlength="50"
+          placeholder="고기, 파스타, 보드게임처럼 검색"
+          aria-label="직접 찾을 장소 검색어"
+        >
+        <button id="search-venues" type="button">직접 검색</button>
+      </div>
+      <p id="venue-status" class="venue-status" aria-live="polite"></p>
+      <div id="venue-results" class="venue-grid"></div>
+    </section>
+
+    <section class="panel" id="shortlist-panel" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow dark">SHARED SHORTLIST</p>
+          <h2>우리의 공동 후보</h2>
+          <p>최대 5곳을 담고 실제 이동시간과 팀 투표를 함께 비교합니다.</p>
+        </div>
+        <button id="evaluate-shortlist" type="button">실제 이동시간 비교</button>
+      </div>
+      <div id="shortlist" class="shortlist-grid"></div>
+      <div class="table-wrap"><table id="shortlist-matrix"></table></div>
+    </section>
+
     <section class="panel">
       <details>
         <summary>외부 API 호출 계약 자세히 보기</summary>
