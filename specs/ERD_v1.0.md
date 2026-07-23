@@ -3,64 +3,60 @@
 | 항목 | 내용 |
 |---|---|
 | 문서 버전 | 1.0 |
-| 작성일 | 2026-07-22 |
-| 기준 문서 | `기능명세서_v1.3.md`, `API명세서_v1.1.md`, `시스템아키텍처_v1.0.md` |
-| DB | PostgreSQL (로컬: Docker, 운영: Cloud SQL) |
+| 작성일 | 2026-07-23 |
+| 기준 문서 | `2026-07-23-candidate-place-board-product-design.md` |
+| DB | PostgreSQL |
 | 스키마 관리 | Flyway migration만 사용 |
 | 시간 | 전부 `timestamptz`, UTC 저장 |
-| 좌표 | WGS84. `lon`=경도, `lat`=위도, `double precision` |
+| 좌표 | WGS84, `lon`=경도, `lat`=위도 |
 
-## 0. 설계 원칙 (팀 합의 사항)
+## 0. 설계 원칙
 
-1. **PK는 내부 `bigint` identity**, 외부 노출용 `public_id`(ULID + 접두사, 예: `brd_01H...`)를 별도 unique 컬럼으로 둔다. FK는 전부 bigint.
-2. **코스 초안 stops는 JSONB 한 컬럼**. 초안은 PUT 전체 교체라 정규화하지 않는다.
-3. **확정 코스도 스냅샷 복사하지 않는다.** `course_stop`은 `place_id` FK만 참조한다. 장소는 soft delete라 행이 사라지지 않으므로 조회는 가능하다. MVP에서 DB 수준 불변성을 강제하지 않는다.
-4. **외부 API 결과 캐시와 캐시 전용 테이블은 사용하지 않는다.** 검색 후보는 저장하지 않고, 사용자가 확정한 장소·출발지와 지역 찾기·출발 안내 결과만 도메인 테이블에 저장한다. TTL이나 캐시 적중 정책을 두지 않는다.
-5. **토큰 저장 방식은 용도에 따라 다르다.** 개인 인증용 참여 토큰 secret만 HMAC으로 저장한다(다시 보여줄 일이 없고, 유출 시 계정 도용이 되기 때문). 초대 코드와 공개 토큰은 **원문으로 저장**한다 — 호스트 초대 화면과 공유 링크에서 원문을 다시 보여줘야 하는데 HMAC은 역변환이 불가능하기 때문이다. 두 값은 만료·상태로 접근을 통제하고 로그에서 마스킹한다.
-6. **개인 출발지 좌표의 평문 사본을 만들지 않는다.** 좌표는 `participant.origin_ciphertext` 한 곳에만 암호화 저장하고, 지역 찾기 작업은 참여자 ID만 스냅샷으로 남긴 뒤 실행 시점에 원본을 복호화해 읽는다. **작업 입력의 일관성은 좌표 복사가 아니라 변경 잠금으로 보장한다** — 보드에 활성 지역 찾기 작업(`QUEUED`/`RUNNING`/`RETRY_WAIT`)이 있는 동안 대상 참여자의 출발지 변경을 거부하므로, 어느 phase에서 읽어도 좌표가 동일하고 재시작 후 재실행도 같은 입력을 쓴다.
-7. MVP 제외: `PlaceReaction`(P1), `ActivityEvent`(조회 API 없음), 알림, 운영 대시보드 테이블. PostGIS 미사용 — 폴리곤 연산은 JTS가 애플리케이션에서 수행하고 GeoJSON은 JSONB로 저장.
+1. 핵심 모델은 후보 장소 보드 하나에 집중한다.
+2. 보드의 현재 선택 장소는 `board.selected_place_id` nullable FK 하나로 표현한다.
+3. 출발지는 `participant.origin_ciphertext`에만 암호화 저장하고 타인 응답에는 평문을 노출하지 않는다.
+4. 장소 저장 모델은 공급자 중립적이어야 하며 특정 지도 API에 종속된 테이블을 두지 않는다.
+5. 장소 삭제는 물리 삭제 대신 `ACTIVE` / `ARCHIVED` 상태 전환으로 처리한다.
+6. 좋아요는 `(place_id, participant_id)` 유일성으로 멱등 보장한다.
+7. 정식 투표, 코스, 출발 계산, 공개 토큰용 canonical 테이블은 유지하지 않는다.
 
 ## 1. 전체 관계도
 
 ```mermaid
 erDiagram
-    board ||--o{ participant : "참여"
-    board ||--o{ place : "장소"
-    participant ||--o{ place : "제안"
-    place ||--o{ place_comment : "댓글"
-    participant ||--o{ place_comment : "작성"
-    board ||--o{ vote : "투표"
-    vote ||--o{ vote_option : "후보"
-    vote_option }o--|| place : "장소 참조"
-    vote_option ||--o{ vote_ballot : "표"
-    participant ||--o{ vote_ballot : "투표함"
-    board ||--o{ area_search_job : "지역 찾기"
-    area_search_job ||--o{ area_candidate : "지역 후보"
-    board ||--o| course_draft : "초안(1개)"
-    board ||--o{ course : "확정 버전"
-    course ||--o{ course_stop : "방문 장소"
-    course_stop }o--|| place : "장소 참조"
-    participant ||--o{ departure_calculation : "출발 계산"
-    course ||--o{ departure_calculation : "버전 기준"
+    board ||--o{ participant : "has"
+    board ||--o{ place : "has"
+    participant ||--o{ place : "proposes"
+    place ||--o{ place_like : "liked"
+    participant ||--o{ place_like : "likes"
+    place ||--o{ place_comment : "has"
+    participant ||--o{ place_comment : "writes"
+    board ||--o{ area_search_job : "runs"
+    area_search_job ||--o{ area_suggestion : "returns"
 ```
 
 ## 2. 테이블 정의
 
-공통 컬럼(모든 테이블): `id bigint generated always as identity primary key`, `created_at timestamptz not null default now()`, `updated_at timestamptz not null default now()`. 아래 표에서는 생략한다.
+공통 컬럼:
+- `id bigint generated always as identity primary key`
+- `created_at timestamptz not null default now()`
+- `updated_at timestamptz not null default now()`
 
 ### 2.1 board
 
 | 컬럼 | 타입 | 제약 | 설명 |
 |---|---|---|---|
 | public_id | text | unique, not null | `brd_` + ULID |
-| name | text | not null | 2~40자 (앱 검증) |
-| date_start | date | not null | |
-| date_end | date | not null | start 이상 |
-| purpose | text | | 선택 |
-| status | text | not null, default 'COLLECTING' | COLLECTING / CONFIRMED / CLOSED |
-| invite_code | text | unique, not null | 원문 저장. 호스트 초대 화면에서 다시 보여줘야 하므로 단방향 해시로 저장하지 않는다 |
-| invite_expires_at | timestamptz | not null | |
-| public_token | text | unique | 원문 저장. 최초 확정 시 생성, 그 전 null |
+| name | text | not null | 2~40자 |
+| status | text | not null, default 'OPEN' | `OPEN` / `CLOSED` |
+| host_participant_id | bigint | FK participant, null | 생성 직후 host 연결 전까지 null 허용 가능 |
+| selected_place_id | bigint | nullable FK place | 현재 선택 장소 |
+| closed_at | timestamptz | null | 보관 시각 |
+
+제약:
+- `check (status in ('OPEN','CLOSED'))`
+- `selected_place_id`는 같은 보드의 장소만 가리켜야 하므로 `foreign key (selected_place_id, id) references place (id, board_id)`로 강제한다.
+- 선택 대상은 `ACTIVE` 장소만 허용하며, 이는 애플리케이션 트랜잭션에서 확인한다.
 
 ### 2.2 participant
 
@@ -68,18 +64,17 @@ erDiagram
 |---|---|---|---|
 | public_id | text | unique, not null | `ptc_` + ULID |
 | board_id | bigint | FK board, not null | |
-| nickname | text | not null | 1~20자, 중복 허용 |
-| role | text | not null | HOST / MEMBER |
-| token_hash | text | not null | HMAC-SHA-256(secret) |
-| avatar_color | text | not null | |
-| active | boolean | not null, default true | 호스트가 비활성화 가능 |
-| origin_label | text | | 출발지 표시명 (예: 정왕역) |
-| origin_ciphertext | bytea | | 암호화된 lon/lat. null이면 미등록 |
-| origin_source | text | | KAKAO_KEYWORD / KAKAO_ADDRESS / MANUAL_PIN |
-| origin_provider_place_id | text | | 선택 |
+| nickname | text | not null | 1~20자 |
+| role | text | not null | `HOST` / `MEMBER` |
+| token_hash | text | not null | 참여 토큰 해시 |
+| active | boolean | not null, default true | 비활성 참여자 구분 |
+| origin_label | text | null | 표시용 요약 |
+| origin_ciphertext | bytea | null | 암호화된 출발지 좌표/원문 |
+| origin_source | text | null | `KAKAO`, `NAVER`, `EXTERNAL`, `MANUAL` 등 |
 
-- 타인 조회 시 `origin_ciphertext is not null` 여부만 `registered`로 노출한다.
-- 좌표는 애플리케이션 수준 암호화(아키텍처 문서 7절). 평문 lat/lon 컬럼을 두지 않는다.
+제약:
+- `check (role in ('HOST','MEMBER'))`
+- 보드당 활성 HOST는 정확히 1명이어야 하므로 `unique index ... where role = 'HOST' and active = true`
 
 ### 2.3 place
 
@@ -89,62 +84,46 @@ erDiagram
 | board_id | bigint | FK board, not null | |
 | proposer_id | bigint | FK participant, not null | |
 | name | text | not null | 1~100자 |
-| lon / lat | double precision | not null | |
-| address_name | text | | |
-| road_address_name | text | | |
-| internal_category | text | not null | RESTAURANT / CAFE / PLAY / BAR / CULTURE / ATTRACTION / TRANSIT / ETC |
-| provider | text | | 검색 결과는 'KAKAO', 수동 핀은 null |
-| provider_place_id | text | | |
-| provider_place_url | text | | 허용 도메인 검증 후 저장 |
-| source | text | not null | SEARCH_SELECT / MANUAL_PIN |
-| status | text | not null, default 'ACTIVE' | ACTIVE / ARCHIVED |
-| deleted_at | timestamptz | | soft delete |
+| lon | double precision | not null | |
+| lat | double precision | not null | |
+| address_name | text | null | 지번 주소 |
+| road_address_name | text | null | 도로명 주소 |
+| category | text | null | 공급자 원본 또는 내부 매핑 |
+| source_provider | text | not null | `KAKAO` / `NAVER` / `EXTERNAL` / `MANUAL` |
+| provider_place_id | text | null | 공급자 원본 ID |
+| source_url | text | null | 원본 지도 링크 |
+| status | text | not null, default 'ACTIVE' | `ACTIVE` / `ARCHIVED` |
+| archived_at | timestamptz | null | 보관 시각 |
 
-- 중복 장소 허용, 자동 병합 없음 (BR-004).
-- SEARCHING/NEEDS_CONFIRMATION 상태는 저장하지 않는다 — 사용자 선택 전에는 행을 만들지 않기 때문 (BR-003).
+제약:
+- `check (status in ('ACTIVE','ARCHIVED'))`
+- `check (source_provider in ('KAKAO','NAVER','EXTERNAL','MANUAL'))`
+- `check (lon between 124 and 132 and lat between 33 and 39)` for Korea MVP 범위
+- `unique (id, board_id)`를 둬 `board.selected_place_id`의 same-board FK를 지원한다.
 
-### 2.4 place_comment
+### 2.4 place_like
+
+| 컬럼 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| place_id | bigint | FK place, not null | |
+| participant_id | bigint | FK participant, not null | |
+
+제약:
+- `primary key (place_id, participant_id)` 또는 동등한 unique index
+- 같은 참여자는 같은 장소를 한 번만 좋아요할 수 있다.
+
+### 2.5 place_comment
 
 | 컬럼 | 타입 | 제약 | 설명 |
 |---|---|---|---|
 | public_id | text | unique, not null | `cmt_` + ULID |
 | place_id | bigint | FK place, not null | |
 | author_id | bigint | FK participant, not null | |
-| body | text | not null | 1~500자, 일반 텍스트 |
-| deleted_at | timestamptz | | soft delete |
+| body | text | not null | 1~500자 |
+| deleted_at | timestamptz | null | 소프트 삭제 |
 
-### 2.5 vote / vote_option / vote_ballot
-
-**vote**
-
-| 컬럼 | 타입 | 제약 | 설명 |
-|---|---|---|---|
-| public_id | text | unique, not null | `vot_` + ULID |
-| board_id | bigint | FK board, not null | |
-| status | text | not null, default 'OPEN' | OPEN / CLOSED |
-| max_selections | int | not null | 1 이상 |
-| anonymous | boolean | not null | 생성 시 고정 |
-| closes_at | timestamptz | not null | |
-
-**vote_option**
-
-| 컬럼 | 타입 | 제약 |
-|---|---|---|
-| vote_id | bigint | FK vote, not null |
-| place_id | bigint | FK place, not null |
-| unique (vote_id, place_id) | | 같은 투표에 같은 장소 중복 금지 |
-
-**vote_ballot**
-
-| 컬럼 | 타입 | 제약 |
-|---|---|---|
-| vote_id | bigint | FK vote, not null |
-| participant_id | bigint | FK participant, not null |
-| option_id | bigint | FK vote_option, not null |
-| unique (vote_id, participant_id, option_id) | | |
-
-- 내 투표 PUT 교체 = 트랜잭션 안에서 해당 (vote_id, participant_id) 전체 delete 후 insert.
-- 보드당 열린 투표 1개: `create unique index on vote (board_id) where status = 'OPEN';`
+제약:
+- 삭제는 작성자만 가능하며 권한은 애플리케이션 계층에서 검사한다.
 
 ### 2.6 area_search_job
 
@@ -152,117 +131,112 @@ erDiagram
 |---|---|---|---|
 | public_id | text | unique, not null | `job_` + ULID |
 | board_id | bigint | FK board, not null | |
-| status | text | not null, default 'QUEUED' | QUEUED / RUNNING / RETRY_WAIT / SUCCEEDED / FAILED |
+| requester_id | bigint | FK participant, not null | HOST 요청자 |
+| status | text | not null, default 'QUEUED' | `QUEUED` / `RUNNING` / `SUCCEEDED` / `FAILED` |
 | duration_min | int | not null | 30 / 45 / 60 |
-| snapshot | jsonb | not null | **대상 참여자 ID 목록만** 저장. duration은 `duration_min` 컬럼에 있으므로 중복 저장하지 않고, 출발 좌표도 복사하지 않는다 |
-| progress | jsonb | | phase / done / total |
-| result | jsonb | | 교집합 GeoJSON + 요약 (성공 시) |
-| error_code | text | | NO_INTERSECTION / NO_HUB_FOUND / EXTERNAL_UNAVAILABLE / ORIGIN_REQUIRED. 마지막은 접수 후 실행 시점에 대상 출발지가 사라진 경우(POST 검증 실패는 HTTP 422로 별도 처리) |
-| retry_count | int | not null, default 0 | |
-| next_retry_at | timestamptz | | RETRY_WAIT용 |
-| started_at / finished_at | timestamptz | | |
+| participant_snapshot | jsonb | not null | 참여자 ID 목록과 입력 스냅샷 |
+| result_summary | jsonb | null | 공통 영역/오류 요약 |
+| error_code | text | null | `NO_INTERSECTION` 등 |
+| started_at | timestamptz | null | |
+| finished_at | timestamptz | null | |
 
-- 보드당 활성 작업 1개: `create unique index on area_search_job (board_id) where status in ('QUEUED','RUNNING','RETRY_WAIT');`
-- Job Executor가 `SELECT ... FOR UPDATE SKIP LOCKED`로 선점하는 대상 테이블이다.
+제약:
+- `check (duration_min in (30,45,60))`
+- `check (status in ('QUEUED','RUNNING','SUCCEEDED','FAILED'))`
 
-### 2.7 area_candidate
+### 2.7 area_suggestion
 
 | 컬럼 | 타입 | 제약 | 설명 |
 |---|---|---|---|
-| public_id | text | unique, not null | `arc_` + ULID |
+| public_id | text | unique, not null | `asg_` + ULID |
 | job_id | bigint | FK area_search_job, not null | |
-| name | text | not null | 예: 신도림역 |
-| lon / lat | double precision | not null | |
-| provider_place_id | text | | Kakao 장소 ID |
-| metrics | jsonb | not null | avgSeconds / maxSeconds / transferAvg / unreachableCount |
-| reasons | jsonb | not null | 설명 문자열 배열 |
 | rank | int | not null | 1~3 |
+| name | text | not null | 예: 신도림역 |
+| lon | double precision | not null | |
+| lat | double precision | not null | |
+| provider | text | not null | 기준점 수집 공급자 |
+| provider_place_id | text | null | 공급자 원본 ID |
+| reason_summary | jsonb | not null | 선택 이유 목록 |
 
-### 2.8 course_draft
-
-| 컬럼 | 타입 | 제약 | 설명 |
-|---|---|---|---|
-| board_id | bigint | FK board, unique, not null | 보드당 1행 |
-| version | int | not null, default 0 | ETag / If-Match 비교용 |
-| stops | jsonb | not null, default '[]' | `[{placeId, orderIndex, role, scheduledAt}]` |
-
-- PUT마다 version+1, 전체 교체. stops 내 placeId 유효성은 애플리케이션에서 검증.
-
-### 2.9 course / course_stop
-
-**course**
-
-| 컬럼 | 타입 | 제약 | 설명 |
-|---|---|---|---|
-| public_id | text | unique, not null | `crs_` + ULID |
-| board_id | bigint | FK board, not null | |
-| version | int | not null | 보드 내 확정 순번, unique (board_id, version) |
-| confirmed_at | timestamptz | not null | |
-
-- "현재 확정 코스" = 보드의 version 최대 행. 별도 current 플래그 없음.
-
-**course_stop**
-
-| 컬럼 | 타입 | 제약 | 설명 |
-|---|---|---|---|
-| course_id | bigint | FK course, not null | |
-| place_id | bigint | FK place, not null | 스냅샷 없이 FK 참조 |
-| order_index | int | not null | unique (course_id, order_index) |
-| role | text | not null | FIRST_MEETING / MEAL / CAFE / PLAY / ETC |
-| scheduled_at | timestamptz | not null | |
-
-- 코스당 FIRST_MEETING 1개(= order_index 1)는 애플리케이션 검증.
-- 코스에 포함된 장소 삭제 시도는 이 테이블 참조 검사로 `409 PLACE_IN_USE` 처리.
-
-### 2.10 departure_calculation
-
-| 컬럼 | 타입 | 제약 | 설명 |
-|---|---|---|---|
-| participant_id | bigint | FK participant, not null | |
-| course_id | bigint | FK course, not null | 계산 기준 확정 버전 |
-| status | text | not null | CALCULATING / READY / STALE / UNAVAILABLE / FAILED |
-| total_seconds | int | | |
-| transfer_count | int | | |
-| fare_amount | int | | KRW |
-| total_walk_seconds | int | | 보조 표시용 |
-| recommended_departure_at | timestamptz | | 만남시각 - totalSeconds - 10분 |
-| calculated_at | timestamptz | | |
-| unique (participant_id, course_id) | | | 참여자×버전당 1건 |
-
-- `NOT_REQUESTED`는 행 없음으로 표현한다.
-- 출발지·일정 변경 시 해당 행들을 STALE로 갱신 (BR-012).
-- `CALCULATING`은 대기와 실행을 함께 나타낸다. 단일 Job Executor가 처리하며 짧은 인메모리 재시도 후에도 실패하면 `FAILED`로 저장한다.
-- 같은 참여자·코스의 `READY` 행 반환은 캐시 적중이 아니라 현재 도메인 결과 조회다. 별도 TMAP 좌표쌍 캐시나 TTL은 두지 않는다.
+제약:
+- `check (rank between 1 and 3)`
+- `unique (job_id, rank)`
 
 ## 3. 인덱스 요약
 
-FK 컬럼은 전부 인덱스를 만든다 (PostgreSQL은 FK에 자동 인덱스를 만들지 않음).
+FK 컬럼은 전부 인덱스를 생성한다. 추가 인덱스는 아래를 기준으로 한다.
 
 ```sql
--- 조회 패턴 기반
-create index on place (board_id, status) where deleted_at is null;
-create index on place_comment (place_id) where deleted_at is null;
-create index on participant (board_id);
-create index on vote_ballot (vote_id, participant_id);
-create index on course (board_id, version desc);
-create index on area_search_job (status, next_retry_at);  -- Job Executor 폴링용
+create unique index ux_participant_host_per_board
+    on participant (board_id)
+    where role = 'HOST' and active = true;
 
--- 유일성 (부분 인덱스)
-create unique index on vote (board_id) where status = 'OPEN';
-create unique index on area_search_job (board_id)
-    where status in ('QUEUED','RUNNING','RETRY_WAIT');
+create unique index ux_place_like_unique
+    on place_like (place_id, participant_id);
+
+create index ix_place_board_active
+    on place (board_id, created_at desc)
+    where status = 'ACTIVE';
+
+create index ix_place_proposer
+    on place (proposer_id, created_at desc);
+
+create index ix_place_comment_place_active
+    on place_comment (place_id, created_at asc)
+    where deleted_at is null;
+
+create unique index ux_area_search_job_active
+    on area_search_job (board_id)
+    where status in ('QUEUED','RUNNING');
+
+create index ix_area_search_job_board_created
+    on area_search_job (board_id, created_at desc);
+
+create unique index ux_area_suggestion_rank
+    on area_suggestion (job_id, rank);
 ```
 
-토큰 조회는 `participant.public_id`로 참여자를 찾고 `token_hash`를 비교하므로 별도 인덱스가 필요 없다 (public_id unique 인덱스 사용).
+## 4. 핵심 무결성 규칙
 
-## 4. 의도적으로 하지 않은 것
+1. `board.status = 'CLOSED'`면 장소 추가, 좋아요, 댓글, 선택 변경, 지역 제안 시작을 막는다.
+2. `board.selected_place_id`는 null 또는 같은 보드의 `ACTIVE` 장소 하나여야 한다.
+3. `ARCHIVED` 장소에는 새 좋아요, 댓글, 선택 지정을 허용하지 않는다.
+4. `place_like.participant_id`와 `place.proposer_id`는 같은 `board_id` 소속 참여자여야 한다.
+5. `place_comment.author_id`도 같은 보드 참여자여야 한다.
+6. `area_search_job.requester_id`는 HOST여야 한다.
+7. 출발지 평문 좌표는 어떤 테이블에도 별도 컬럼으로 저장하지 않는다.
 
-| 항목 | 이유 |
-|---|---|
-| 확정 코스 스냅샷 컬럼 | place가 soft delete라 FK로 충분. MVP 단순성 우선 (팀 결정) |
-| 외부 API 결과 캐시·캐시 테이블 | 검색 후보는 저장하지 않고 지역 찾기·출발 안내 결과만 도메인 기록으로 보존 (팀 결정) |
-| PostGIS | 폴리곤 연산은 JTS(앱), GeoJSON은 JSONB 저장으로 충분 |
-| enum 타입 (PostgreSQL ENUM) | 값 추가 시 migration 부담. text + 앱 검증 |
-| ActivityEvent / PlaceReaction / 알림 | MVP API에 없음 |
-| 트리거·저장 프로시저 | 로직은 전부 애플리케이션 계층 |
-| 파티셔닝, 커서 페이지네이션용 구조 | 규모상 불필요, 문제 확인 후 도입 |
+## 5. 선택/삭제 트랜잭션
+
+### 5.1 현재 선택 장소 지정 또는 변경
+
+1. `board` 행을 `FOR UPDATE`로 잠근다.
+2. 대상 `place`가 같은 보드에 속하고 `status = 'ACTIVE'`인지 확인한다.
+3. `update board set selected_place_id = :placeId, updated_at = now() where id = :boardId`
+4. 커밋 후 조회 응답에서 `selectedPlaceId`를 반환한다.
+
+### 5.2 선택된 장소 삭제(보관)
+
+1. 트랜잭션 시작
+2. `board` 행을 `FOR UPDATE`로 잠근다.
+3. `place` 행을 조회해 같은 보드와 삭제 권한을 확인한다.
+4. `board.selected_place_id = :placeId`면 먼저 `selected_place_id = null`로 갱신한다.
+5. `update place set status = 'ARCHIVED', archived_at = now(), updated_at = now() where id = :placeId`
+6. 커밋
+
+이 순서를 고정해 선택 포인터가 보관된 장소를 가리키는 상태를 막는다.
+
+## 6. 범위에서 제외하는 canonical 테이블
+
+다음 테이블은 새 MVP 기준 canonical schema에서 제거한다.
+
+- `vote`
+- `vote_option`
+- `vote_ballot`
+- `course_draft`
+- `course`
+- `course_stop`
+- `departure_calculation`
+- 공개 일정/공개 토큰 전용 canonical 테이블
+
+초대 코드, 참여 토큰 해시 등 접근 제어에 필요한 값은 `board`와 `participant` 내부 컬럼으로만 유지한다.

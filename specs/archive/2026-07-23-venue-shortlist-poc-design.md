@@ -2,7 +2,11 @@
 
 작성일: 2026-07-23  
 대상: `api-validation/poc-v2`  
-상태: 설계 승인
+상태: 아카이브 — 현행 제품 기준이 아님
+
+> 이 문서는 공정성 순위와 TMAP 전수 평가를 검증하던 과거 PoC 기록입니다.
+> 현행 기준은 `../../superpowers/specs/2026-07-23-candidate-place-board-product-design.md`와
+> `../기능명세서_v1.3.md`를 따릅니다.
 
 ## 1. 목적
 
