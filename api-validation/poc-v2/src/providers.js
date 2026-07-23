@@ -26,6 +26,25 @@ function createProviders({ client, keys }) {
     return { data: normalizeKakaoKeyword(result.body), record: result.record };
   }
 
+  async function kakaoCategory({ category, lon, lat, radius = 1000, size = 15 }) {
+    const url = new URL("https://dapi.kakao.com/v2/local/search/category.json");
+    const params = {
+      category_group_code: category,
+      x: lon,
+      y: lat,
+      radius,
+      sort: "distance",
+      size,
+    };
+    Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
+    const result = await client.json({
+      provider: "KAKAO",
+      url: url.toString(),
+      headers: { Authorization: `KakaoAK ${keys.kakao}` },
+    });
+    return { data: normalizeKakaoKeyword(result.body), record: result.record };
+  }
+
   async function kakaoAddress(query) {
     const url = new URL("https://dapi.kakao.com/v2/local/search/address.json");
     url.searchParams.set("query", query);
@@ -73,7 +92,7 @@ function createProviders({ client, keys }) {
     return { data: normalizeTmapTransit(result.body), record: result.record };
   }
 
-  return Object.freeze({ kakaoKeyword, kakaoAddress, odsayIsochrone, tmapTransit });
+  return Object.freeze({ kakaoKeyword, kakaoCategory, kakaoAddress, odsayIsochrone, tmapTransit });
 }
 
 module.exports = { createProviders };
